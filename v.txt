@@ -1,0 +1,46 @@
+#!/bin/ksh
+
+# Vertica Connection Settings
+VSQL="/path/to/vsql"
+HOST="your_vertica_host"
+DB="your_vertica_db"
+USER="your_vertica_user"
+PASSWORD="your_vertica_password"
+
+# File to be processed
+INPUT_FILE="/path/to/your_file.csv"
+
+# Counters for processed and rejected lines
+Nbr_Ligne_Traitee=0
+Nbr_Ligne_Rejetee=0
+
+# Process each line in the file
+while IFS= read -r line; do
+    if [[ $(echo "$line" | awk -F';' '{print NF-1}') -eq 21 ]]; then
+        ((Nbr_Ligne_Traitee++))
+    else
+        ((Nbr_Ligne_Rejetee++))
+        # Insert into T_APP_REJ_ODS (adjust SQL command as necessary)
+        echo "INSERT INTO T_APP_REJ_ODS (rejected_line) VALUES ('$line');" | $VSQL -h $HOST -U $USER -w $PASSWORD -d $DB
+    fi
+done < "$INPUT_FILE"
+
+# Insert counts into T_ADM_SUIVI_ALIM
+{
+    echo "INSERT INTO T_ADM_SUIVI_ALIM (Nbr_Ligne_Traitee, Nbr_Ligne_Rejetee) VALUES ($Nbr_Ligne_Traitee, $Nbr_Ligne_Rejetee);"
+} | $VSQL -h $HOST -U $USER -w $PASSWORD -d $DB
+
+# Function for error handling (adjust according to your error handling logic from the script)
+gestion_erreur_archivage() {
+    if [ $1 -ne 0 ]; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S');ERROR;$2" >> script_error.log
+        exit 1
+    fi
+}
+
+# Verify if Vertica commands were successful
+if [ $? -ne 0 ]; then
+    gestion_erreur_archivage $? "Failed to update Vertica tables"
+fi
+
+echo "Script completed. Processed lines: $Nbr_Ligne_Traitee, Rejected lines: $Nbr_Ligne_Rejetee"
