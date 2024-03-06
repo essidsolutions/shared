@@ -1,0 +1,279 @@
+#!/usr/bin/ksh
+#
+#  Description ........: REFACTORING - Script d'archivage de fichiers
+#  Auteur .............: sopra steria
+#  Date de creation ...: 03/2020
+#  Version ............: V7.02.65
+
+# ---------------------- Modification(s) ------------------------------#
+#  @Desc :                                                             #
+#                                                                      #
+# ---------------------------------------------------------------------#
+#  Auteur .............:                                               #
+#  Date de modification ...:                                           #
+# ---------------------------------------------------------------------#
+
+#**************************************************************************
+#
+# Script pour l'archivage des fichiers
+#
+# Syntaxe : sd_basu31_0_archive_fic_refact.sh $1 $2"
+#
+# Liste des options
+
+##################################
+#
+# Codes retour :  0 si OK
+#                 1 Erreur
+#                 2 Alertes
+#                 3 Ex¦cution impossible
+#
+##################################
+#
+# Modifications :
+# 12/04/2021 TCM-10552 Ajout insertion du nombre des fichiers dans la table T_ADM_SUIVI_ALIMENTATION
+#**************************************************************************
+#set -x
+###################################################################################
+#       Fonction Usage
+###################################################################################
+function usage
+{
+        print "Syntaxe :"
+    print "sd_basu31_0_archive_fic_refact.sh  <Path Projet> <Nom Produit> "
+    print ""
+        print "Exemple :"
+    print "sd_basu31_0_archive_fic_refact.sh /app/list/sd/sid/dev1/ sepa"
+    print ""
+    print "Liste des options :"
+    print ""
+    print "    <Path Projet>   : Path du Projet - racine"
+        print "    <Nom fdu Produit>  : Nom du Produit SID "
+    exit 3
+
+}
+
+###################################################################################
+#       Fonction Gestion des erreurs
+###################################################################################
+
+function gestion_erreur_archivage
+{
+        if [ $1 -ne 0 ]
+        then
+                maj_suivialim_erreur
+                echo `date +"%Y-%m-%d %H:%M:%S"`";MSG000101;FATAL;$2 ($1)" >> ${RepLogTraitementFic}
+                echo "$2"
+                # Appel du shell pour le synchro des logs MAPR sur le Log Globale
+                . ${GpPathProjet}${GpProgramShell}sd_basu31_2_synchrolog_mapr_refact.sh ${GpPathProjet} sid_bi_archive_fic_refact_${IdfUnic}.log ${NOMPRODUIT}
+                exit 3
+        fi
+}
+
+
+###################################################################################
+#       Fonction MAJ SuiviAlim
+###################################################################################
+
+function maj_suivialim_erreur
+{
+echo `date +"%Y-%m-%d %H:%M:%S"`";MSG000101;INFO;Le traitement sd_basu31_2_maj_suivialim_mapr_refact.sh ${NOMPRODUIT} a debute" >> ${RepLogTraitementFic}
+
+${GpPathProjet}${GpProgramShell}sd_basu31_2_maj_suivialim_mapr_refact.sh ${GpPathProjet} ${NOMPRODUIT} "ERREUR|Archivage des fichiers" >> ${GpPathProjet}${GpDataCompteRendu}mapr/ods/maj_suivialim_mapr_"${NOMPRODUIT}"_${DATETIMESTAMP}.log
+RC_MAJ_SUIVIALIM=$?
+if [ $RC_MAJ_SUIVIALIM -ne 0 ]
+then
+        gestion_erreur "$RC_MAJ_SUIVIALIM" "ERREUR: l¦ex¦cution du traitement de la mise ¦ jour du suivi de l'alimentation avec un ERREUR dans le produit ${NOMPRODUIT} sd_basu31_0_archive_fic_refact.sh a echoue"
+fi
+echo "Info: Le traitement sd_basu31_2_maj_suivialim_refact pour le produit = ${NOMPRODUIT} a reussi"
+echo `date +"%Y-%m-%d %H:%M:%S"`";MSG000101;INFO;Le traitement sd_basu31_2_maj_suivialim_refact.sh ${NOMPRODUIT} a reussi" >> ${RepLogTraitementFic}
+
+}
+
+###################################################################################
+#       Fonction Gestion de l'encodage Vertica
+###################################################################################
+
+function gestion_vertica
+{
+        export LANG="en_US.UTF-8"
+        export LC_COLLATE="en_US.UTF-8"
+        export LC_CTYPE="en_US.UTF-8"
+        export LC_MONETARY="en_US.UTF-8"
+        export LC_NUMERIC="en_US.UTF-8"
+        export LC_TIME="en_US.UTF-8"
+        export LC_MESSAGES="en_US.UTF-8"
+        export LC_ALL="en_US.UTF-8"
+}
+
+###################################################################################
+#       Verification des parametres du job de lancement
+###################################################################################
+
+# S'il n'y a pas 2 argument, alors la syntaxe n'est pas correcte
+if [ ${#} -lt 2 -o ${#} -gt 2 ]
+then
+        print "Le nombre d'arguments pass¦ au shell n'est pas correct !"
+        print ""
+        usage
+fi
+
+###################################################################################
+#       Initialisation des variables
+###################################################################################
+# Param¦tres d'entr¦e
+PATHPROJET=$1
+NOMPRODUIT=$2
+
+# Variables calcul¦es
+PATHCONF=${PATHPROJET}conf/${NOMPRODUIT}
+DATETIMESTAMP=`date +"%Y%m%d%H%M%S"`
+NUM_RANDOM=`echo $((1 + RANDOM % 100000000))`
+NUM_SECONDS=`date +"%s"`
+MILISECOND=${NUM_RANDOM}${NUM_SECONDS}
+IdfUnic=${DATETIMESTAMP}_${MILISECOND}
+dtarchive=${DATETIMESTAMP}
+
+
+###################################################################################
+#       Charge des variables de les properties
+###################################################################################
+
+FILE_SID_LOGPARAMS=${PATHPROJET}"/conf/mapr/ods/properties/sidlogparams.properties"
+
+if [ -f $FILE_SID_LOGPARAMS ]
+then
+        . $FILE_SID_LOGPARAMS
+else
+        gestion_erreur_archivage 3 "ERREUR: Le fichier ${FILE_SID_LOGPARAMS} est introuvable, impossible de r¦cup¦rer les param¦tres MAPR ODS"
+fi
+
+FicPropertiesProduit=${PATHCONF}"/properties/${NOMPRODUIT}.properties"
+
+if [ -f $FicPropertiesProduit ]
+then
+        . $FicPropertiesProduit
+else
+        gestion_erreur_archivage 3 "ERREUR: Le fichier ${FicPropertiesProduit} est introuvable, impossible de recuperer les parametres du produit"
+fi
+
+FILE_DT_ALIM=${PATHCONF}/"dateTimeAlimentation.txt"
+
+if [ -f $FILE_DT_ALIM ]
+then
+        . $FILE_DT_ALIM
+else
+        gestion_erreur_archivage 3 "ERREUR: Le fichier ${FILE_DT_ALIM} est introuvable, impossible de recuperer la date d'alimentation"
+fi
+
+CD_DTALIM=$DateTimeAlimentation
+
+###################################################################################
+#       Initialisation le traitement sur le log global
+###################################################################################
+
+CheminLog=log/${NOMPRODUIT}
+RepLogTraitementFic=${GpPathProjet}${CheminLog}/sid_bi_archive_fic_refact_${IdfUnic}.log
+
+echo `date +"%Y-%m-%d %H:%M:%S"`";MSG000101;INFO;Le traitement sd_basu31_0_archive_fic_refact.sh pour le produit ${NOMPRODUIT} a debute" >> ${RepLogTraitementFic}
+
+# Repertoires
+REPSORTIE=${PATHPROJET}"sortie/"${NOMPRODUIT}"ok/"
+REPENTREE=${PATHPROJET}"entree/"${NOMPRODUIT}"/"
+NBCHAMPS=$(echo "$REPENTREE"|awk -F'/' '{print NF; exit}')
+REPENTREEFULL=$REPENTREE"*.*"
+
+###################################################################################
+#       Variables
+###################################################################################
+
+echo "***************************************************************"
+echo "VARIABLES DU SHELL sd_basu31_0_archive_fic_refact.sh"
+echo "***************************************************************"
+echo "#Param¦tres pass¦s au shell"
+echo "---------------------------"
+echo "PATHPROJET               = $PATHPROJET"
+echo "NOMPRODUIT              = $NOMPRODUIT"
+echo "---------------------------"
+echo "#Param¦tres calcul¦es"
+echo "---------------------------"
+echo "PATHCONF               = $PATHCONF"
+echo "CheminLog              = $CheminLog"
+echo "RepLogTraitementFic    = $RepLogTraitementFic"
+echo "REPSORTIE                = $REPSORTIE"
+echo "REPENTREE   = $REPENTREE"
+echo "NBCHAMPS            = $NBCHAMPS"
+echo "REPENTREEFULL    = $REPENTREEFULL"
+echo "ProduitIdf                = $ProduitIdf"
+
+
+ficNamesList=""
+num_fichiers=0
+ls -p $REPENTREEFULL
+echo "nomfic"$val
+# On parcourt les fichiers qui contiennent le nom du produit
+for filesOk in $(ls -p $REPENTREEFULL 2> /dev/null | grep "${ProduitIdf}\.")
+do
+        # On d¦place, et on liste, les fichiers ¦ archiver.
+        if [ -f $filesOk ]
+        then
+                FICNAME=$(echo $filesOk|cut -d/ -f $NBCHAMPS)
+                mv $REPENTREE$FICNAME $REPSORTIE"IDF_OK."$FICNAME
+                CR_MV=$?
+                if [ ! "$CR_MV" -eq "0" ]
+                then
+                        gestion_erreur_archivage 3 "Erreur sur la commande MV dans le rennommage de le fichier $REPENTREE$FICNAME ¦ $REPSORTIE"IDF_OK."$FICNAME"
+                fi
+
+                ficNamesList=${ficNamesList}" IDF_OK."${FICNAME}
+                echo "Fichier archiv¦ : "$filesOk
+                num_fichiers=`expr ${num_fichiers} + 1`
+        fi
+done
+
+if [ ! "${ficNamesList}" = "" ]; then
+        cd $REPSORTIE
+        tar -cvzf ${ProduitIdf}".IDF_OK_"${dtarchive}".tar.gz" ${ficNamesList}
+
+        EXIT_STATUS=$?
+        if [ "$EXIT_STATUS" -eq "0" ]
+        then
+                rm ${ficNamesList}
+        else
+                gestion_erreur_archivage 3 "Erreur sur la compression du r¦pertoire $REPSORTIE$NOMPRODUIT"
+
+        fi
+fi
+
+##########################################################################
+# Insertion du nombre de fichiers dans la table T_ADM_SUIVI_ALIMENTATION #
+##########################################################################
+
+
+# Chargement des variables pour Vertica
+gestion_vertica
+echo "NB_Fichiers=${NB_Fichiers}"
+
+${GpVsql}vsql -h ${GsDWHbaseHostsql} -B ${backup} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -t -c "UPDATE $GsDWHbaseSchema.T_ADM_SUIVI_ALIMENTATION SET NB_Fichiers=${num_fichiers} WHERE CD_DTALIM='${CD_DTALIM}' and Statut_Commentaire='${NOMPRODUIT}' and Etape_Traitement='Extraction_ODS';commit;"
+QUERY_RESULT=$?
+# Erreur si la requ¦te ne renvoie rien
+if [ "$QUERY_RESULT" == "" ]
+then
+        gestion_erreur_archivage 3 "ERREUR: La mise ¦ jour de la table T_ADM_SUIVI_ALIMENTATION avec le nombre des fichiersd traites a echoue (${QUERY_RESULT})"
+fi
+echo `date +"%Y-%m-%d %H:%M:%S"`";MSG000101;INFO;La valeur NB_Fichiers a ete mise a jour dans la table T_ADM_SUIVI_ALIMENTATION correctement" >> ${RepLogTraitementFic}
+
+#########################################################################
+#########################################################################
+
+echo `date +"%Y-%m-%d %H:%M:%S"`";MSG000101;INFO;Le traitement sd_basu31_0_archive_fic_refact.sh pour le produit ${NOMPRODUIT} a r¦ussi" >> ${RepLogTraitementFic}
+
+# Appel du shell pour le synchro des logs MAPR sur le Log Globale
+        . ${GpPathProjet}${GpProgramShell}sd_basu31_2_synchrolog_mapr_refact.sh ${GpPathProjet} sid_bi_archive_fic_refact_${IdfUnic}.log ${NOMPRODUIT}
+
+exit 0
+
+#**************************************************************************
+# Final
+#**************************************************************************
+
