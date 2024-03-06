@@ -1,0 +1,325 @@
+##########################################################################
+
+# Chargement des variables pour Vertica
+gestion_vertica
+echo "NB_Fichiers=${NB_Fichiers}"
+
+${GpVsql}vsql -h ${GsDWHbaseHostsql} -B ${backup} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -t -c "UPDATE $GsDWHbaseSchema.T_ADM_SUIVI_ALIMENTATION SET NB_Fichiers=${num_fichiers} WHERE CD_DTALIM='${CD_DTALIM}' and Statut_Commentaire='${NOMPRODUIT}' and Etape_Traitement='Extraction_ODS';commit;"
+QUERY_RESULT=$?
+# Erreur si la requ¦te ne renvoie rien
+if [ "$QUERY_RESULT" == "" ]
+then
+    gestion_erreur_archivage 3 "ERREUR: La mise a jour de la table T_ADM_SUIVI_ALIMENTATION avec le nombre des fichiersd traites a echoue (${QUERY_RESULT})"
+fi
+echo `date +"%Y-%m-%d %H:%M:%S"`";MSG000101;INFO;La valeur NB_Fichiers a ete mise a jour dans la table T_ADM_SUIVI_ALIMENTATION correctement"
+
+##########################################################################
+#  Mise a jour de la table T_ADM_SUIVI_ALIMENTATION                                     #
+##########################################################################
+
+remplir_arrays `echo $LISTECODESTRT` LISTECODESTRT_array
+
+i=0
+while [[ $i -lt ${#LISTECODESTRT_array[@]} ]]
+do
+
+    ${GpVsql}vsql -h ${GsDWHbaseHostsql} -B $backup -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -t -c "UPDATE $GsDWHbaseSchema.T_ADM_SUIVI_ALIMENTATION SET SourceSid='${NOMPRODUIT}' WHERE CD_DTALIM='${CD_DTALIM}' and Code_Traitement='${LISTECODESTRT_array[$i]}' and Etape_Traitement='Alimentation_ODS';commit;"
+    EXEC_VERTICA=$?
+    if [ $EXEC_VERTICA -ne 0 ]
+    then
+        gestion_erreur_archivage $EXEC_VERTICA "ERREUR: La mise a jour du suivi d'alimentation pour le Code_Traitement = ${LISTECODESTRT_array[$i]} a echoue"
+    fi
+    echo "INFO: La mise a jour du suivi d'alimentation pour le Code_Traitement = ${LISTECODESTRT_array[$i]} a reussi"
+
+i=$(($i + 1))
+done
+
+echo `date +"%Y-%m-%d %H:%M:%S"`";MSG000101;INFO;Le traitement sd_basu31_0_archive_fic_sid.sh pour le produit ${NOMPRODUIT} a reussi"
+exit 0
+
+#**************************************************************************
+# Final
+#**************************************************************************
+$ grep -l "REJ_" 20221011-DR_V7.002.000_OK/script/program/shell/sd_basu31_0_archive_fic_sid.sh
+$ grep -l "rejet" 20221011-DR_V7.002.000_OK/script/program/shell/sd_basu31_0_archive_fic_sid.sh
+$ grep -l "rej" 20221011-DR_V7.002.000_OK/script/program/shell/sd_basu31_0_archive_fic_sid.sh
+$ grep -l "rej" 20221011-DR_V7.002.000_OK/script/program/shell/sd_basu31_0_archive_fic_sid.sh
+$ clear
+$ cat 20221011-DR_V7.002.000_OK/script/program/shell/sd_basu31_0_archive_fic_sid.sh
+#!/usr/bin/ksh
+#
+#  Description ........: Script d'archivage de fichiers SID
+#  Auteur .............: sopra steria
+#  Date de creation ...: 08/2022
+#  Version ............: V7.002.000
+
+# ---------------------- Modification(s) ------------------------------#
+#  @Desc :                                                             #
+#                                                                      #
+# ---------------------------------------------------------------------#
+#  Auteur .............:                                               #
+#  Date de modification ...:                                           #
+# ---------------------------------------------------------------------#
+
+#**************************************************************************
+#
+# Script pour l'archivage des fichiers
+#
+# Syntaxe : sd_basu31_0_archive_fic_sid.sh $1 $2 $3 $4"
+#
+# Liste des options
+
+##################################
+#
+# Codes retour :  0 si OK
+#                 1 Erreur
+#                 2 Alertes
+#                 3 Ex¦cution impossible
+#
+##################################
+#
+# Modifications :
+#**************************************************************************
+
+###################################################################################
+#   Fonction Usage
+###################################################################################
+function usage
+{
+    print "Syntaxe :"
+    print "sd_basu31_0_archive_fic_sid.sh  <Path Projet> <Nom Produit> <ProduitIdf> <ListeCodesTraitements>  "
+    print ""
+    print "Exemple :"
+    print "sd_basu31_0_archive_fic_sid.sh /app/list/sd/sid/dev1/ sepa SEPA* 0SEPA|OLOT"
+    print ""
+    print "Liste des options :"
+    print ""
+    print "    <Path Projet>   : Path du Projet - racine"
+    print "    <Nom du Produit>  : Nom du Produit SID "
+    print "    <ProduitIdf>  : Prefixe des fichiers "
+    print "    <ListeCodesTraitements>  : Liste des codes de traitements du produit "
+    exit 3
+
+}
+
+###################################################################################
+#   Fonction pour remplir un array avec les valeurs d'une variable
+###################################################################################
+
+
+function remplir_arrays
+{
+    #set -x
+    donnes=$1
+    variable=$2
+
+    delim="|"
+    num_Delim=`echo $donnes|tr -dc "${delim}"|wc -c|awk '{print\$1}'`
+    num_Delim_Total=$(($num_Delim + 1))
+    i=0
+    while [ $i -lt ${num_Delim_Total} ]
+    do
+        numCut=$(($i + 1))
+        calcul=`echo $donnes|cut -d"${delim}" -f$numCut`
+        eval ${variable}[$i]=$calcul
+        ###Pour faire le debug### eval echo ${variable}[$i]
+        i=$(($i + 1))
+    done
+}
+
+###################################################################################
+#   Fonction Gestion des erreurs
+###################################################################################
+
+function gestion_erreur_archivage
+{
+    if [ $1 -ne 0 ]
+    then
+        echo `date +"%Y-%m-%d %H:%M:%S"`";MSG000101;FATAL;$2 ($1)"
+        echo "$2"
+        exit 3
+    fi
+}
+
+###################################################################################
+#   Fonction Gestion de l'encodage Vertica
+###################################################################################
+
+function gestion_vertica
+{
+    export LANG="en_US.UTF-8"
+    export LC_COLLATE="en_US.UTF-8"
+    export LC_CTYPE="en_US.UTF-8"
+    export LC_MONETARY="en_US.UTF-8"
+    export LC_NUMERIC="en_US.UTF-8"
+    export LC_TIME="en_US.UTF-8"
+    export LC_MESSAGES="en_US.UTF-8"
+    export LC_ALL="en_US.UTF-8"
+}
+
+###################################################################################
+#   Verification des parametres du job de lancement
+###################################################################################
+
+# S'il n'y a pas 4 argument, alors la syntaxe n'est pas correcte
+if [ ${#} -lt 4 -o ${#} -gt 4 ]
+then
+    print "Le nombre d'arguments pass¦ au shell n'est pas correct !"
+    print ""
+    usage
+fi
+
+###################################################################################
+#   Initialisation des variables
+###################################################################################
+# Param¦tres d'entr¦e
+PATHPROJET=$1
+NOMPRODUIT=$2
+ProduitIdf=`echo ${3}|cut -d "." -f1`
+LISTECODESTRT=$4
+
+# Variables calcul¦es
+PATHCONF=${PATHPROJET}conf/${NOMPRODUIT}
+DATETIMESTAMP=`date +"%Y%m%d%H%M%S"`
+
+
+###################################################################################
+#   Charge des variables de les properties
+###################################################################################
+
+FILE_SID_LOGPARAMS=${PATHPROJET}"/conf/mapr/ods/properties/sidlogparams.properties"
+
+if [ -f ${FILE_SID_LOGPARAMS} ]
+then
+    . ${FILE_SID_LOGPARAMS}
+else
+    gestion_erreur_archivage 3 "ERREUR: Le fichier ${FILE_SID_LOGPARAMS} est introuvable, impossible de r¦cup¦rer les param¦tres MAPR ODS"
+fi
+
+
+FILE_DT_ALIM=${PATHCONF}/"dateTimeAlimentation.txt"
+
+if [ -f ${FILE_DT_ALIM} ]
+then
+    . ${FILE_DT_ALIM}
+else
+    gestion_erreur_archivage 3 "ERREUR: Le fichier ${FILE_DT_ALIM} est introuvable, impossible de recuperer la date d'alimentation"
+fi
+
+CD_DTALIM=${DateTimeAlimentation}
+
+###################################################################################
+#   Initialisation le traitement sur le log global
+###################################################################################
+
+
+echo `date +"%Y-%m-%d %H:%M:%S"`";MSG000101;INFO;Le traitement sd_basu31_0_archive_fic_sid.sh pour le produit ${NOMPRODUIT} a debute"
+
+# Repertoires
+REPSORTIE=${PATHPROJET}"sortie/"${NOMPRODUIT}"ok/"
+REPENTREE=${PATHPROJET}"entree/"${NOMPRODUIT}"/"
+NBCHAMPS=$(echo "$REPENTREE"|awk -F'/' '{print NF; exit}')
+REPENTREEFULL=${REPENTREE}"*.*"
+
+###################################################################################
+#   Variables
+###################################################################################
+
+echo "***************************************************************"
+echo "VARIABLES DU SHELL sd_basu31_0_archive_fic_sid.sh"
+echo "***************************************************************"
+echo "#Param¦tres pass¦s au shell"
+echo "---------------------------"
+echo "PATHPROJET               = $PATHPROJET"
+echo "NOMPRODUIT              = $NOMPRODUIT"
+echo "---------------------------"
+echo "#Param¦tres calcul¦es"
+echo "---------------------------"
+echo "PATHCONF               = $PATHCONF"
+echo "REPSORTIE                = $REPSORTIE"
+echo "REPENTREE   = $REPENTREE"
+echo "NBCHAMPS            = $NBCHAMPS"
+echo "REPENTREEFULL    = $REPENTREEFULL"
+echo "ProduitIdf                = $ProduitIdf"
+
+
+ficNamesList=""
+num_fichiers=0
+ls -p ${REPENTREEFULL}
+
+# On parcourt les fichiers qui contiennent le nom du produit
+for filesOk in $(ls -p $REPENTREEFULL 2> /dev/null | grep "${ProduitIdf}\.")
+do
+    # On d¦place, et on liste, les fichiers ¦ archiver.
+    if [ -f ${filesOk} ]
+    then
+        FICNAME=$(echo $filesOk|cut -d/ -f $NBCHAMPS)
+        mv ${REPENTREE}${FICNAME} ${REPSORTIE}"IDF_OK."${FICNAME}
+        CR_MV=$?
+        if [ ! "$CR_MV" -eq "0" ]
+        then
+         gestion_erreur_archivage 3 "Erreur sur la commande MV dans le rennommage de le fichier $REPENTREE$FICNAME ¦ $REPSORTIE"IDF_OK."$FICNAME"
+        fi
+
+        ficNamesList=${ficNamesList}" "${REPSORTIE}"IDF_OK."${FICNAME}
+        echo "Fichier archiv¦ : "${filesOk}
+        num_fichiers=`expr ${num_fichiers} + 1`
+    fi
+done
+
+if [ ! "${ficNamesList}" = "" ]; then
+    tar cf - ${ficNamesList} | gzip > ${REPSORTIE}${ProduitIdf}".IDF_OK_"${DATETIMESTAMP}".tar.gz"
+    EXIT_STATUS=$?
+    if [ "$EXIT_STATUS" -eq "0" ]
+    then
+        rm ${ficNamesList}
+    else
+        gestion_erreur_archivage 3 "Erreur sur la compression du r¦pertoire $REPSORTIE$NOMPRODUIT"
+
+    fi
+fi
+
+##########################################################################
+# Insertion du nombre de fichiers dans la table T_ADM_SUIVI_ALIMENTATION #
+##########################################################################
+
+# Chargement des variables pour Vertica
+gestion_vertica
+echo "NB_Fichiers=${NB_Fichiers}"
+
+${GpVsql}vsql -h ${GsDWHbaseHostsql} -B ${backup} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -t -c "UPDATE $GsDWHbaseSchema.T_ADM_SUIVI_ALIMENTATION SET NB_Fichiers=${num_fichiers} WHERE CD_DTALIM='${CD_DTALIM}' and Statut_Commentaire='${NOMPRODUIT}' and Etape_Traitement='Extraction_ODS';commit;"
+QUERY_RESULT=$?
+# Erreur si la requ¦te ne renvoie rien
+if [ "$QUERY_RESULT" == "" ]
+then
+    gestion_erreur_archivage 3 "ERREUR: La mise a jour de la table T_ADM_SUIVI_ALIMENTATION avec le nombre des fichiersd traites a echoue (${QUERY_RESULT})"
+fi
+echo `date +"%Y-%m-%d %H:%M:%S"`";MSG000101;INFO;La valeur NB_Fichiers a ete mise a jour dans la table T_ADM_SUIVI_ALIMENTATION correctement"
+
+##########################################################################
+#  Mise a jour de la table T_ADM_SUIVI_ALIMENTATION                                     #
+##########################################################################
+
+remplir_arrays `echo $LISTECODESTRT` LISTECODESTRT_array
+
+i=0
+while [[ $i -lt ${#LISTECODESTRT_array[@]} ]]
+do
+
+    ${GpVsql}vsql -h ${GsDWHbaseHostsql} -B $backup -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -t -c "UPDATE $GsDWHbaseSchema.T_ADM_SUIVI_ALIMENTATION SET SourceSid='${NOMPRODUIT}' WHERE CD_DTALIM='${CD_DTALIM}' and Code_Traitement='${LISTECODESTRT_array[$i]}' and Etape_Traitement='Alimentation_ODS';commit;"
+    EXEC_VERTICA=$?
+    if [ $EXEC_VERTICA -ne 0 ]
+    then
+        gestion_erreur_archivage $EXEC_VERTICA "ERREUR: La mise a jour du suivi d'alimentation pour le Code_Traitement = ${LISTECODESTRT_array[$i]} a echoue"
+    fi
+    echo "INFO: La mise a jour du suivi d'alimentation pour le Code_Traitement = ${LISTECODESTRT_array[$i]} a reussi"
+
+i=$(($i + 1))
+done
+
+echo `date +"%Y-%m-%d %H:%M:%S"`";MSG000101;INFO;Le traitement sd_basu31_0_archive_fic_sid.sh pour le produit ${NOMPRODUIT} a reussi"
+exit 0
+
+#**************************************************************************
+# Final
+#**************************************************************************
