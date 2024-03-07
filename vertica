@@ -1,0 +1,114 @@
+#!/bin/ksh
+
+# Function to display the usage of the script in French
+show_usage() {
+    echo "Utilisation: $0 [-count] [-clean <nombre_delimiteurs_valides>] [-vertica] [-removeorigin] [-delimiter <delimiter>] <fichier_entree>"
+    echo "Options:"
+    echo "  -count                 Compter les lignes et les délimiteurs dans le fichier."
+    echo "  -clean                 Nettoyer le fichier en fonction du nombre de délimiteurs, en conservant uniquement les lignes avec le nombre spécifié."
+    echo "  -vertica               Insérer les enregistrements dans la table Vertica pour les lignes rejetées."
+    echo "  -removeorigin          Supprimer le fichier original après le traitement."
+    echo "  -delimiter             Spécifier le délimiteur utilisé dans le fichier (par défaut, ';')."
+    echo "Exemple:"
+    echo "  $0 -clean 5 -vertica -removeorigin -delimiter ';' mon_fichier.csv"
+}
+
+# Variables
+count_flag=0
+clean_flag=0
+vertica_flag=0
+remove_origin_flag=0
+valid_delimiter_count=0
+custom_delimiter=";" # Default delimiter
+INPUT_FILE=""
+total_valid_lines=0
+total_rejected_lines=0
+
+# Parse command-line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            show_usage
+            exit 0
+            ;;
+        -count)
+            count_flag=1
+            shift
+            ;;
+        -clean)
+            clean_flag=1
+            shift
+            valid_delimiter_count="$1"
+            shift
+            ;;
+        -vertica)
+            vertica_flag=1
+            shift
+            ;;
+        -removeorigin)
+            remove_origin_flag=1
+            shift
+            ;;
+        -delimiter)
+            shift
+            custom_delimiter="$1"
+            shift
+            ;;
+        *)
+            INPUT_FILE="$1"
+            shift
+            ;;
+    esac
+done
+
+# Check if the input file is provided and exists
+if [[ -z "$INPUT_FILE" || ! -f "$INPUT_FILE" ]]; then
+    echo "Erreur : Fichier d'entrée non fourni ou n'existe pas."
+    show_usage
+    exit 1
+fi
+
+# Database credentials (replace with your actual credentials)
+DB_HOST="your_vertica_host"
+DB_USER="your_vertica_user"
+DB_PASSWORD="your_vertica_password"
+DB_NAME="your_vertica_database"
+
+# Function to insert rejected lines into the Vertica table
+insert_rejected_line() {
+    if [[ $vertica_flag -eq 1 ]]; then
+        local rejected_line="$1"
+        # Make sure to handle escaping and formatting for SQL correctly here
+        echo "INSERT INTO T_APP_REJ_ODS_GLOBAL (rejected_line) VALUES (E'${rejected_line//\'/\'\'}');" | \
+        vsql -h "$DB_HOST" -U "$DB_USER" -w "$DB_PASSWORD" -d "$DB_NAME"
+    fi
+    ((total_rejected_lines++))
+}
+
+# Function to process the file based on flags
+process_file() {
+    mkdir -p okfile
+    OUTPUT_FILE="okfile/$(basename "$INPUT_FILE")"
+    > "$OUTPUT_FILE"
+
+    while IFS= read -r line; do
+        count=$(echo "$line" | awk -F"$custom_delimiter" '{print NF-1}')
+        if [[ $count -eq $valid_delimiter_count ]]; then
+            echo "$line" >> "$OUTPUT_FILE"
+            ((total_valid_lines++))
+        else
+            insert_rejected_line "$line"
+        fi
+    done < "$INPUT_FILE"
+
+    if [[ $remove_origin_flag -eq 1 ]]; then
+        rm -f "$INPUT_FILE"
+    fi
+
+    echo "Fichier nettoyé enregistré dans $OUTPUT_FILE"
+    echo "Lignes valides : $total_valid_lines"
+    echo "Lignes rejetées : $total_rejected_lines"
+}
+
+# Call the process_file function
+process_file
