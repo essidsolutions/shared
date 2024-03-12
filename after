@@ -18,11 +18,12 @@ count_flag=0
 clean_flag=0
 vertica_flag=0
 remove_origin_flag=0
-valid_delimiter_count=0
-custom_delimiter=";" # Default delimiter
+valid_delimiter_count=20  # Set this based on your data
+custom_delimiter=";" # Default delimiter for processing
 FULLFILENAME=""
 
 # Load configurations
+# Ensure this path and file are correct for your setup
 . /app/list/sd/sid/rct1/conf/mapr/ods/properties/sidlogparams.properties
 
 ###################################################################################
@@ -37,12 +38,6 @@ function gestion_vertica {
     export LC_TIME="en_US.UTF-8"
     export LC_MESSAGES="en_US.UTF-8"
     export LC_ALL="en_US.UTF-8"
-}
-
-# Function to count the number of delimiters in each line of the file
-count_delimiters() {
-    echo "Counting delimiters in the file: $FULLFILENAME"
-    awk -F"$custom_delimiter" '{print NF-1}' "$FULLFILENAME" | sort -n | uniq -c
 }
 
 # Parse command-line arguments
@@ -88,9 +83,55 @@ if [[ -z "$FULLFILENAME" || ! -f "$FULLFILENAME" ]]; then
     exit 1
 fi
 
+# Function to process and clean the file
+process_file() {
+    mkdir -p /app/list/sd/sid/rct1/entree/
+    valid_file="/app/list/sd/sid/rct1/entree/valid_$(basename "$FULLFILENAME")"
+    invalid_file="/app/list/sd/sid/rct1/entree/invalid_$(basename "$FULLFILENAME")"
+    current_date=$(date +%Y-%m-%d)  # Get current date for DT_DREJET
+    filename=$(basename "$FULLFILENAME")  # Extract filename for LB_FILENAME
+    tablename="HelloMohamed"  # Static value for LB_NOMTABLE
+    >"$valid_file"
+    >"$invalid_file"
+
+    awk -F"$custom_delimiter" -v valid_count=$valid_delimiter_count -v date="$current_date" -v filename="$filename" -v tablename="$tablename" '{
+        if(NF-1 == valid_count) {
+            print $0 >> "'$valid_file'"  # Correct number of fields, considered valid
+        } else {
+            print NR, $0, filename, date, tablename >> "'$invalid_file'"  # Incorrect number of fields, considered invalid
+        }
+    }' OFS="|" "$FULLFILENAME"
+
+    # Output counts
+    total_valid_lines=$(wc -l < "$valid_file")
+    total_rejected_lines=$(wc -l < "$invalid_file")
+    echo "Fichier nettoyé enregistré dans $valid_file"
+    echo "Lignes valides : $total_valid_lines"
+    echo "Lignes rejetées : $total_rejected_lines"
+}
+
+# Function to insert rejected lines into the Vertica table
+bulk_insert_to_vertica() {
+    gestion_vertica  # Set environment for Vertica
+    invalid_file="/app/list/sd/sid/rct1/entree/invalid_$(basename "$FULLFILENAME")"
+    if [[ $vertica_flag -eq 1 && -s "$invalid_file" ]]; then
+        log_file="/app/list/sd/sid/rct1/entree/vertica_insert_log_$(basename "$FULLFILENAME").txt"
+        ${GpVsql}vsql -h ${GsDWHbaseHostsql} -B ${backup} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -t -c "COPY $GsDWHbaseSchema.T_APP_REJ_ODS_GLOBAL(NB_ROWNUM, LB_CONTENU, LB_FILENAME, DT_DREJET, LB_NOMTABLE) FROM LOCAL '$invalid_file' DELIMITER E'|' ENFORCELENGTH DIRECT;" > $log_file 2>&1
+        QUERY_RESULT=$?
+        if [[ $QUERY_RESULT -ne 0 ]]; then
+            echo "ERROR: Failed to update T_APP_REJ_ODS_GLOBAL with rejected lines. Check log $log_file for details."
+        else
+            echo "$(date +"%Y-%m-%d %H:%M:%S") - Rejected lines have been successfully updated in T_APP_REJ_ODS_GLOBAL."
+        fi
+    else
+        echo "No rejected lines to insert into Vertica."
+    fi
+}
+
 # Main script execution
 if [[ $count_flag -eq 1 ]]; then
-    count_delimiters
+    # Placeholder for count function if needed
+    echo "Count functionality not implemented."
 fi
 
 if [[ $clean_flag -eq 1 ]]; then
