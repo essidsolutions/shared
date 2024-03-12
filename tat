@@ -13,7 +13,7 @@ show_usage() {
     echo "  $0 -clean 5 -vertica -removeorigin -delimiter ';' mon_fichier.csv"
 }
 
-# Default settings
+# Initialize variables
 count_flag=0
 clean_flag=0
 vertica_flag=0
@@ -70,6 +70,7 @@ fi
 
 # Function to count delimiters and lines
 count_delimiters() {
+    echo "Starting delimiter count..."
     awk -F"$custom_delimiter" -v OFS='\t' '{print NF-1, $0}' "$FULLFILENAME" | sort -n | uniq -c > delimiter_count.txt
     echo "Delimiter counts saved to delimiter_count.txt"
 }
@@ -77,19 +78,28 @@ count_delimiters() {
 # Function to process and clean the file
 process_file() {
     mkdir -p okfile
-    local valid_file="okfile/valid_$(basename "$FULLFILENAME")"
-    local invalid_file="okfile/invalid_$(basename "$FULLFILENAME")"
-    local rejection_date="2024-03-12"  # Set the rejection date
+    valid_file="okfile/valid_$(basename "$FULLFILENAME")"
+    invalid_file="okfile/invalid_$(basename "$FULLFILENAME")"
+    rejection_date="2024-03-12"  # Set the rejection date
     >"$valid_file"
     >"$invalid_file"
 
-    awk -F"$custom_delimiter" -v valid_count=$valid_delimiter_count -v date="$rejection_date" '{
+    total_lines=$(wc -l < "$FULLFILENAME")
+    lines_processed=0
+
+    echo "Starting file processing..."
+    awk -F"$custom_delimiter" -v valid_count=$valid_delimiter_count -v date="$rejection_date" -v total_lines=$total_lines '{
         if(NF-1 == valid_count) {
             print $0 >> "'$valid_file'"
         } else {
-            print $0 FS date >> "'$invalid_file'"
+            print $0, date >> "'$invalid_file'"
+        }
+        processed_lines++;
+        if (processed_lines % (total_lines / 20) == 0) {
+            printf("\rProgress: %d%%", (processed_lines / total_lines) * 100);
         }
     }' "$FULLFILENAME"
+    echo "\rProcessing complete.          "
 
     # Output counts
     total_valid_lines=$(wc -l < "$valid_file")
@@ -101,11 +111,11 @@ process_file() {
 
 # Function to insert rejected lines into the Vertica table
 bulk_insert_to_vertica() {
-    local invalid_file="okfile/invalid_$(basename "$FULLFILENAME")"
+    invalid_file="okfile/invalid_$(basename "$FULLFILENAME")"
     if [[ $vertica_flag -eq 1 && -s "$invalid_file" ]]; then
-        gestion_vertica  # Ensure this sets up your environment correctly for Vertica
+        echo "Inserting rejected lines into Vertica..."
         ${GpVsql}vsql -h ${GsDWHbaseHostsql} -B ${backup} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -t -c "COPY $GsDWHbaseSchema.T_APP_REJ_ODS_GLOBAL(LB_COLUMN, DT_DREJET) FROM LOCAL '$invalid_file' DELIMITER E'$custom_delimiter' ENFORCELENGTH DIRECT;"
-        echo "$(date +"%Y-%m-%d %H:%M:%S") - les lignes rejetées ont été mises à jour dans la table T_APP_REJ_ODS_GLOBAL correctement"
+        echo "Insertion complete."
     fi
 }
 
