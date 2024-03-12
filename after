@@ -88,17 +88,22 @@ process_file() {
     mkdir -p /app/list/sd/sid/rct1/entree/
     valid_file="/app/list/sd/sid/rct1/entree/valid_$(basename "$FULLFILENAME")"
     invalid_file="/app/list/sd/sid/rct1/entree/invalid_$(basename "$FULLFILENAME")"
-    current_date=$(date +%Y-%m-%d)  # Get current date for DT_DREJET
-    filename=$(basename "$FULLFILENAME")  # Extract filename for LB_FILENAME
+    current_date=$(date +%Y-%m-%d)  # Current date for DT_DREJET
+    filename=$(basename "$FULLFILENAME")  # Filename for LB_FILENAME
     tablename="HelloMohamed"  # Static value for LB_NOMTABLE
     >"$valid_file"
     >"$invalid_file"
 
+    # Diagnostics: Print the first few lines considered invalid
+    echo "Diagnostic output for invalid lines:"
     awk -F"$custom_delimiter" -v valid_count=$valid_delimiter_count -v date="$current_date" -v filename="$filename" -v tablename="$tablename" '{
         if(NF-1 == valid_count) {
-            print $0 >> "'$valid_file'"  # Correct number of fields, considered valid
+            print $0 >> "'$valid_file'"  # Line considered valid
         } else {
-            print NR, $0, filename, date, tablename >> "'$invalid_file'"  # Incorrect number of fields, considered invalid
+            print NR, $0, filename, date, tablename >> "'$invalid_file'"  # Line considered invalid
+            if(NR <= 5) {  # Change this number to see more lines
+                print "Invalid line " NR ": " $0 " (Fields count: " NF ")";
+            }
         }
     }' OFS="|" "$FULLFILENAME"
 
@@ -109,6 +114,7 @@ process_file() {
     echo "Lignes valides : $total_valid_lines"
     echo "Lignes rejetées : $total_rejected_lines"
 }
+
 
 # Function to insert rejected lines into the Vertica table
 bulk_insert_to_vertica() {
