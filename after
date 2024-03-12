@@ -1,0 +1,15 @@
+# Function to insert rejected lines into the Vertica table
+bulk_insert_to_vertica() {
+    invalid_file="okfile/invalid_$(basename "$FULLFILENAME")"
+    if [[ $vertica_flag -eq 1 && -s "$invalid_file" ]]; then
+        echo "Inserting rejected lines into Vertica..."
+        ${GpVsql}vsql -h ${GsDWHbaseHostsql} -B ${backup} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -t -c "COPY $GsDWHbaseSchema.T_APP_REJ_ODS_GLOBAL(LB_COLUMN, DT_DREJET) FROM LOCAL '$invalid_file' DELIMITER E'$custom_delimiter' ENFORCELENGTH DIRECT;"
+        if [[ $? -eq 0 ]]; then  # Check if the COPY command was successful
+            ${GpVsql}vsql -h ${GsDWHbaseHostsql} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -c "COMMIT;"  # Explicitly commit the transaction
+            echo "Insertion and commit complete."
+        else
+            echo "Error during COPY operation, rollback initiated."
+            ${GpVsql}vsql -h ${GsDWHbaseHostsql} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -c "ROLLBACK;"  # Rollback if there was an error
+        fi
+    fi
+}
