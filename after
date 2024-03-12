@@ -18,8 +18,8 @@ count_flag=0
 clean_flag=0
 vertica_flag=0
 remove_origin_flag=0
-valid_delimiter_count=20  # Set this based on your data
-custom_delimiter=";" # Default delimiter for processing
+valid_delimiter_count=0
+custom_delimiter=";" # Default delimiter
 FULLFILENAME=""
 
 # Load configurations
@@ -53,8 +53,13 @@ while [[ $# -gt 0 ]]; do
             ;;
         -clean)
             clean_flag=1
-            valid_delimiter_count="$1"
-            shift
+            if [[ $2 =~ ^[0-9]+$ ]]; then  # Check if next argument is a number
+                valid_delimiter_count=$2
+                shift 2  # Skip next argument since it's part of -clean
+            else
+                echo "Erreur: '-clean' nécessite un nombre entier de délimiteurs."
+                exit 1
+            fi
             ;;
         -vertica)
             vertica_flag=1
@@ -65,9 +70,8 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -delimiter)
-            shift
-            custom_delimiter="$1"
-            shift
+            custom_delimiter="$2"  # Ensure this captures the next argument
+            shift 2  # Skip next argument since it's been captured
             ;;
         *)
             FULLFILENAME="$1"
@@ -83,7 +87,7 @@ if [[ -z "$FULLFILENAME" || ! -f "$FULLFILENAME" ]]; then
     exit 1
 fi
 
-# Function to process and clean the file with enhanced diagnostics
+# Function to process and clean the file
 process_file() {
     mkdir -p /app/list/sd/sid/rct1/entree/
     valid_file="/app/list/sd/sid/rct1/entree/valid_$(basename "$FULLFILENAME")"
@@ -115,8 +119,6 @@ process_file() {
     echo "Check $diagnostic_file for details on invalid lines."
 }
 
-
-
 # Function to insert rejected lines into the Vertica table
 bulk_insert_to_vertica() {
     gestion_vertica  # Set environment for Vertica
@@ -137,8 +139,8 @@ bulk_insert_to_vertica() {
 
 # Main script execution
 if [[ $count_flag -eq 1 ]]; then
-    # Placeholder for count function if needed
-    echo "Count functionality not implemented."
+    echo "Counting delimiters (this functionality is informational only and does not affect the output files):"
+    count_delimiters
 fi
 
 if [[ $clean_flag -eq 1 ]]; then
