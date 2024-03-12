@@ -2,7 +2,7 @@
 
 # Function to display the usage of the script in French
 show_usage() {
-    echo "Utilisation: $0 [-count] [-clean <nombre_delimiteurs_valides>] [-vertica] [-removeorigin] [-delimiter <delimiter>] <fichier_entree>"
+    echo "Utilisation: $0 [-count] [-clean <nombre_delimiteurs_valides>] [-vertica] [-removeorigin] [-delimiter ';'] <fichier_entree>"
     echo "Options:"
     echo "  -count                 Compter les lignes et les délimiteurs dans le fichier."
     echo "  -clean                 Nettoyer le fichier en fonction du nombre de délimiteurs, en conservant uniquement les lignes avec le nombre spécifié."
@@ -24,10 +24,10 @@ FULLFILENAME=""
 
 # Load configurations
 . /app/list/sd/sid/rct1/conf/mapr/ods/properties/sidlogparams.properties
-###################################################################################
-#       Fonction Gestion de l'encodage Vertica
-###################################################################################
 
+###################################################################################
+#       Function for setting Vertica environment
+###################################################################################
 function gestion_vertica {
     export LANG="en_US.UTF-8"
     export LC_COLLATE="en_US.UTF-8"
@@ -38,6 +38,7 @@ function gestion_vertica {
     export LC_MESSAGES="en_US.UTF-8"
     export LC_ALL="en_US.UTF-8"
 }
+
 # Parse command-line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -110,19 +111,19 @@ process_file() {
 
 # Function to insert rejected lines into the Vertica table
 bulk_insert_to_vertica() {
-    gestion_vertica
+    gestion_vertica  # Set environment for Vertica
     invalid_file="okfile/invalid_$(basename "$FULLFILENAME")"
     if [[ $vertica_flag -eq 1 && -s "$invalid_file" ]]; then
-        gestion_vertica
-        ${GpVsql}vsql -h ${GsDWHbaseHostsql} -B ${backup} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -t -c "COPY $GsDWHbaseSchema.T_APP_REJ_ODS_GLOBAL(NB_ROWNUM, LB_CONTENU, LB_FILENAME, DT_DREJET, LB_NOMTABLE) FROM LOCAL '$invalid_file' DELIMITER E'$custom_delimiter' ENFORCELENGTH DIRECT;"
+        log_file="vertica_insert_log_$(basename "$FULLFILENAME").txt"
+        ${GpVsql}vsql -h ${GsDWHbaseHostsql} -B ${backup} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -t -c "COPY $GsDWHbaseSchema.T_APP_REJ_ODS_GLOBAL(NB_ROWNUM, LB_CONTENU, LB_FILENAME, DT_DREJET, LB_NOMTABLE) FROM LOCAL '$invalid_file' DELIMITER E'$custom_delimiter' ENFORCELENGTH DIRECT;" > $log_file 2>&1
         QUERY_RESULT=$?
-        # Erreur si la requ¦te ne renvoie rien
-        if [ "$QUERY_RESULT" == "" ]; then
-            echo "ERREUR: La mise ¦ jour de la table T_APP_REJ_ODS_GLOBAL avec les lignes rejetees a echoue (${QUERY_RESULT})"
+        if [[ $QUERY_RESULT -ne 0 ]]; then
+            echo "ERROR: Failed to update T_APP_REJ_ODS_GLOBAL with rejected lines. Check log $log_file for details."
+        else
+            echo "$(date +"%Y-%m-%d %H:%M:%S") - Rejected lines have been successfully updated in T_APP_REJ_ODS_GLOBAL."
         fi
-        echo $(date +"%Y-%m-%d %H:%M:%S")
-        echo "les lignes rejetees ont ete mise a jour dans la table T_APP_REJ_ODS_GLOBAL correctement"
-        
+    else
+        echo "No rejected lines to insert into Vertica."
     fi
 }
 
@@ -135,7 +136,7 @@ if [[ $clean_flag -eq 1 ]]; then
     process_file
     if [[ $remove_origin_flag -eq 1 ]]; then
         rm -f "$FULLFILENAME"
-        echo "Fichier original supprimé."
+        echo "Original file removed."
     fi
 fi
 
