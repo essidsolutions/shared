@@ -83,37 +83,38 @@ if [[ -z "$FULLFILENAME" || ! -f "$FULLFILENAME" ]]; then
     exit 1
 fi
 
-# Function to process and clean the file
+# Function to process and clean the file with enhanced diagnostics
 process_file() {
     mkdir -p /app/list/sd/sid/rct1/entree/
     valid_file="/app/list/sd/sid/rct1/entree/valid_$(basename "$FULLFILENAME")"
     invalid_file="/app/list/sd/sid/rct1/entree/invalid_$(basename "$FULLFILENAME")"
+    diagnostic_file="/app/list/sd/sid/rct1/entree/diagnostic_$(basename "$FULLFILENAME")"
     current_date=$(date +%Y-%m-%d)  # Current date for DT_DREJET
     filename=$(basename "$FULLFILENAME")  # Filename for LB_FILENAME
     tablename="HelloMohamed"  # Static value for LB_NOMTABLE
     >"$valid_file"
     >"$invalid_file"
+    >"$diagnostic_file"
 
-    # Diagnostics: Print the first few lines considered invalid
-    echo "Diagnostic output for invalid lines:"
+    # Process and diagnose each line in the file
     awk -F"$custom_delimiter" -v valid_count=$valid_delimiter_count -v date="$current_date" -v filename="$filename" -v tablename="$tablename" '{
         if(NF-1 == valid_count) {
             print $0 >> "'$valid_file'"  # Line considered valid
         } else {
             print NR, $0, filename, date, tablename >> "'$invalid_file'"  # Line considered invalid
-            if(NR <= 5) {  # Change this number to see more lines
-                print "Invalid line " NR ": " $0 " (Fields count: " NF ")";
-            }
+            print "Invalid line " NR ": has " NF-1 " delimiters; expected " valid_count " delimiters." >> "'$diagnostic_file'"
         }
     }' OFS="|" "$FULLFILENAME"
 
-    # Output counts
+    # Output counts and diagnostics
     total_valid_lines=$(wc -l < "$valid_file")
     total_rejected_lines=$(wc -l < "$invalid_file")
-    echo "Fichier nettoyé enregistré dans $valid_file"
-    echo "Lignes valides : $total_valid_lines"
-    echo "Lignes rejetées : $total_rejected_lines"
+    echo "File cleaned and saved to $valid_file"
+    echo "Valid lines: $total_valid_lines"
+    echo "Invalid lines: $total_rejected_lines"
+    echo "Check $diagnostic_file for details on invalid lines."
 }
+
 
 
 # Function to insert rejected lines into the Vertica table
