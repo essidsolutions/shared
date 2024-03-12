@@ -1,0 +1,177 @@
+#!/bin/ksh
+
+# Function to display the usage of the script in French
+show_usage() {
+    echo "Utilisation: $0 [-count] [-clean <nombre_delimiteurs_valides>] [-vertica] [-removeorigin] [-delimiter <delimiter>] <fichier_entree>"
+    echo "Options:"
+    echo "  -count                 Compter les lignes et les délimiteurs dans le fichier."
+    echo "  -clean                 Nettoyer le fichier en fonction du nombre de délimiteurs, en conservant uniquement les lignes avec le nombre spécifié."
+    echo "  -vertica               Insérer les enregistrements dans la table Vertica pour les lignes rejetées."
+    echo "  -removeorigin          Supprimer le fichier original après le traitement."
+    echo "  -delimiter             Spécifier le délimiteur utilisé dans le fichier (par défaut, ';')."
+    echo "Exemple:"
+    echo "  $0 -clean 5 -vertica -removeorigin -delimiter ';' mon_fichier.csv"
+}
+
+# Default settings
+count_flag=0
+clean_flag=0
+vertica_flag=0
+remove_origin_flag=0
+valid_delimiter_count=0
+custom_delimiter=";" # Default delimiter
+FULLFILENAME=""
+
+# Load configurations
+. /app/list/sd/sid/rct1/conf/mapr/ods/properties/sidlogparams.properties
+
+# Parse command-line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h | --help)
+            show_usage
+            exit 0
+            ;;
+        -count)
+            count_flag=1
+            shift
+            ;;
+        -clean)
+            clean_flag=1
+            shift
+            valid_delimiter_count="$1"
+            shift
+            ;;
+        -vertica)
+            vertica_flag=1
+            shift
+            ;;
+        -removeorigin)
+            remove_origin_flag=1
+            shift
+            ;;
+        -delimiter)
+            shift
+            custom_delimiter="$1"
+            shift
+            ;;
+        *)
+            FULLFILENAME="$1"
+            shift
+            ;;
+    esac
+done
+
+# Check if the input file is provided and exists
+if [[ -z "$FULLFILENAME" || ! -f "$FULLFILENAME" ]]; then
+    echo "Erreur : Fichier d'entrée non fourni ou n'existe pas."
+    show_usage
+    exit 1
+fi
+
+# Function to count delimiters and lines
+count_delimiters() {
+    awk -F"$custom_delimiter" -v OFS='\t' '{print NF-1, $0}' "$FULLFILENAME" | sort -n | uniq -c > delimiter_count.txt
+    echo "Delimiter counts saved to delimiter_count.txt"
+}
+
+# Function to process and clean the file
+process_file() {
+    # Prepare the files
+    mkdir -p okfile
+    local valid_file="okfile/valid_$(basename "$FULLFILENAME")
+
+
+
+    local invalid_file="okfile/invalid_$(basename "$FULLFILENAME")"
+    >"$valid_file"
+    >"$invalid_file"
+
+    # Process the file
+    awk -F"$custom_delimiter" -v valid_delimiter_count=$valid_delimiter_count -v valid_file="$valid_file" -v invalid_file="$invalid_file" '{
+        if(NF-1 == valid_delimiter_count) {
+            print $0 >> valid_file
+        } else {
+            print $0 >> invalid_file
+        }
+    }' "$FULLFILENAME"
+
+    # Output counts
+    total_valid_lines=$(wc -l < "$valid_file")
+    total_rejected_lines=$(wc -l < "$invalid_file")
+    echo "Fichier nettoyé enregistré dans $valid_file"
+    echo "Lignes valides : $total_valid_lines"
+    echo "Lignes rejetées : $total_rejected_lines"
+}
+
+# Function to insert rejected lines into the Vertica table
+bulk_insert_to_vertica() {
+    local invalid_file="okfile/invalid_$(basename "$FULLFILENAME")"
+    if [[ $vertica_flag -eq 1 && -s "$invalid_file" ]]; then
+        # Preparing Vertica for UTF-8 and handling rejected lines
+        gestion_vertica
+        ${GpVsql}vsql -h ${GsDWHbaseHostsql} -B ${backup} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -t -c "COPY $GsDWHbaseSchema.T_APP_REJ_ODS_GLOBAL FROM LOCAL '$invalid_file' DELIMITER E'$custom_delimiter' DIRECT ENFORCELENGTH;"
+        echo "$(date +"%Y-%m-%d %H:%M:%S") - les lignes rejetées ont été mises à jour dans la table T_APP_REJ_ODS_GLOBAL correctement"
+    fi
+}
+
+# Main script execution
+if [[ $count_flag -eq 1 ]]; then
+    count_delimiters
+fi
+
+if [[ $clean_flag -eq 1 ]]; then
+    process_file
+    if [[ $remove_origin_flag -eq 1 ]]; then
+        rm -f "$FULLFILENAME"
+        echo "Fichier original supprimé."
+    fi
+fi
+
+if [[ $vertica_flag -eq 1 ]]; then
+    bulk_insert_to_vertica
+fi
+
+
+
+# Function to process and clean the file
+process_file() {
+    # Prepare the files
+    mkdir -p okfile
+    local valid_file="okfile/valid_$(basename "$FULLFILENAME")"
+    local invalid_file="okfile/invalid_$(basename "$FULLFILENAME")"
+    >"$valid_file"
+    >"$invalid_file"
+
+    # Count total lines for progress indication
+    local total_lines=$(wc -l < "$FULLFILENAME")
+    local lines_processed=0
+    local progress_step=$(($total_lines / 20)) # Update progress every 5%
+    local next_progress_threshold=$progress_step
+
+    echo "Starting file processing..."
+
+    # Process the file
+    awk -F"$custom_delimiter" -v valid_delimiter_count=$valid_delimiter_count -v valid_file="$valid_file" -v invalid_file="$invalid_file" -v total_lines=$total_lines '{
+        if(NF-1 == valid_delimiter_count) {
+            print $0 >> valid_file
+        } else {
+            print $0 >> invalid_file
+        }
+        processed_lines++
+        if(processed_lines >= next_progress_threshold) {
+            printf("\rProgress: %d%%", (processed_lines/total_lines)*100);
+            fflush(); # Force output to be written immediately
+            next_progress_threshold += progress_step;
+        }
+    }' "$FULLFILENAME"
+
+    echo -e "\rFile processing complete.                "
+
+    # Output counts
+    total_valid_lines=$(wc -l < "$valid_file")
+    total_rejected_lines=$(wc -l < "$invalid_file")
+    echo "Fichier nettoyé enregistré dans $valid_file"
+    echo "Lignes valides : $total_valid_lines"
+    echo "Lignes rejetées : $total_rejected_lines"
+}
