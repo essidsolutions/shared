@@ -10,7 +10,7 @@ show_usage() {
     echo "  -removeorigin          Supprimer le fichier original après le traitement."
     echo "  -delimiter             Spécifier le délimiteur utilisé dans le fichier (par défaut, ';')."
     echo "Exemple:"
-    echo "  $0 -clean 5 -vertica -removeorigin -delimiter ';' mon_fichier.csv"
+    echo "  $0 -clean 5 -vertica -removeorigin -delimiter ';' mon_fichier.csv" 
 }
 
 # Initialize variables
@@ -24,7 +24,20 @@ FULLFILENAME=""
 
 # Load configurations
 . /app/list/sd/sid/rct1/conf/mapr/ods/properties/sidlogparams.properties
+###################################################################################
+#       Fonction Gestion de l'encodage Vertica
+###################################################################################
 
+function gestion_vertica {
+    export LANG="en_US.UTF-8"
+    export LC_COLLATE="en_US.UTF-8"
+    export LC_CTYPE="en_US.UTF-8"
+    export LC_MONETARY="en_US.UTF-8"
+    export LC_NUMERIC="en_US.UTF-8"
+    export LC_TIME="en_US.UTF-8"
+    export LC_MESSAGES="en_US.UTF-8"
+    export LC_ALL="en_US.UTF-8"
+}
 # Parse command-line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -97,10 +110,19 @@ process_file() {
 
 # Function to insert rejected lines into the Vertica table
 bulk_insert_to_vertica() {
+    gestion_vertica
     invalid_file="okfile/invalid_$(basename "$FULLFILENAME")"
     if [[ $vertica_flag -eq 1 && -s "$invalid_file" ]]; then
-        ${GpVsql}vsql -h ${GsDWHbaseHostsql} -B ${backup} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -t -c "COPY $GsDWHbaseSchema.T_APP_REJ_ODS_GLOBAL(NB_ROWNUM, LB_COLUMN, LB_FILENAME, DT_DREJET, LB_NOMTABLE) FROM LOCAL '$invalid_file' DELIMITER E'$custom_delimiter' ENFORCELENGTH DIRECT;"
-        echo "Insertion complete."
+        gestion_vertica
+        ${GpVsql}vsql -h ${GsDWHbaseHostsql} -B ${backup} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -t -c "COPY $GsDWHbaseSchema.T_APP_REJ_ODS_GLOBAL(NB_ROWNUM, LB_CONTENU, LB_FILENAME, DT_DREJET, LB_NOMTABLE) FROM LOCAL '$invalid_file' DELIMITER E'$custom_delimiter' ENFORCELENGTH DIRECT;"
+        QUERY_RESULT=$?
+        # Erreur si la requ¦te ne renvoie rien
+        if [ "$QUERY_RESULT" == "" ]; then
+            echo "ERREUR: La mise ¦ jour de la table T_APP_REJ_ODS_GLOBAL avec les lignes rejetees a echoue (${QUERY_RESULT})"
+        fi
+        echo $(date +"%Y-%m-%d %H:%M:%S")
+        echo "les lignes rejetees ont ete mise a jour dans la table T_APP_REJ_ODS_GLOBAL correctement"
+        
     fi
 }
 
