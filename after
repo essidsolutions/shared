@@ -18,7 +18,7 @@ count_flag=0
 clean_flag=0
 vertica_flag=0
 remove_origin_flag=0
-valid_delimiter_count=20  # Assumes you want 21 fields, which means 20 delimiters
+valid_delimiter_count=0
 custom_delimiter=";" # Default delimiter
 FULLFILENAME=""
 
@@ -52,7 +52,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         -clean)
             clean_flag=1
-            valid_delimiter_count="$1"  # Read from user input, overriding default
+            valid_delimiter_count="$1"
             shift
             ;;
         -vertica)
@@ -95,9 +95,9 @@ process_file() {
 
     awk -F"$custom_delimiter" -v valid_count=$valid_delimiter_count -v date="$current_date" -v filename="$filename" -v tablename="$tablename" '{
         if(NF-1 == valid_count) {
-            print $0 >> "'$valid_file'"  # Correct fields count, so considered valid
+            print $0 >> "'$valid_file'"  # Correct number of fields, considered valid
         } else {
-            print NR, $0, filename, date, tablename >> "'$invalid_file'"  # Append row number and other fields
+            print NR, $0, filename, date, tablename >> "'$invalid_file'"  # Incorrect number of fields, considered invalid
         }
     }' OFS="|" "$FULLFILENAME"
 
