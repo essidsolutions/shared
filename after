@@ -84,9 +84,9 @@ fi
 
 # Function to process and clean the file
 process_file() {
-    mkdir -p /app/list/sd/sid/entree/
-    valid_file="/app/list/sd/sid/entree/valid_$(basename "$FULLFILENAME")"
-    invalid_file="/app/list/sd/sid/entree/invalid_$(basename "$FULLFILENAME")"
+    mkdir -p /app/list/sd/sid/rct1/entree/
+    valid_file="/app/list/sd/sid/rct1/entree/valid_$(basename "$FULLFILENAME")"
+    invalid_file="/app/list/sd/sid/rct1/entree/invalid_$(basename "$FULLFILENAME")"
     current_date=$(date +%Y-%m-%d)  # Get current date for DT_DREJET
     filename=$(basename "$FULLFILENAME")  # Extract filename for LB_FILENAME
     tablename="HelloMohamed"  # Static value for LB_NOMTABLE
@@ -99,7 +99,7 @@ process_file() {
         } else {
             print $0 >> "'$valid_file'"
         }
-    }' OFS="$custom_delimiter" "$FULLFILENAME"
+    }' OFS="|" "$FULLFILENAME"
 
     # Output counts
     total_valid_lines=$(wc -l < "$valid_file")
@@ -112,10 +112,10 @@ process_file() {
 # Function to insert rejected lines into the Vertica table
 bulk_insert_to_vertica() {
     gestion_vertica  # Set environment for Vertica
-    invalid_file="/app/list/sd/sid/entree/invalid_$(basename "$FULLFILENAME")"
+    invalid_file="/app/list/sd/sid/rct1/entree/invalid_$(basename "$FULLFILENAME")"
     if [[ $vertica_flag -eq 1 && -s "$invalid_file" ]]; then
-        log_file="/app/list/sd/sid/entree/vertica_insert_log_$(basename "$FULLFILENAME").txt"
-        ${GpVsql}vsql -h ${GsDWHbaseHostsql} -B ${backup} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -t -c "COPY $GsDWHbaseSchema.T_APP_REJ_ODS_GLOBAL(NB_ROWNUM, LB_CONTENU, LB_FILENAME, DT_DREJET, LB_NOMTABLE) FROM LOCAL '$invalid_file' DELIMITER E'$custom_delimiter' ENFORCELENGTH DIRECT;" > $log_file 2>&1
+        log_file="/app/list/sd/sid/rct1/entree/vertica_insert_log_$(basename "$FULLFILENAME").txt"
+        ${GpVsql}vsql -h ${GsDWHbaseHostsql} -B ${backup} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -t -c "COPY $GsDWHbaseSchema.T_APP_REJ_ODS_GLOBAL(NB_ROWNUM, LB_CONTENU, LB_FILENAME, DT_DREJET, LB_NOMTABLE) FROM LOCAL '$invalid_file' DELIMITER E'|' ENFORCELENGTH DIRECT;" > $log_file 2>&1
         QUERY_RESULT=$?
         if [[ $QUERY_RESULT -ne 0 ]]; then
             echo "ERROR: Failed to update T_APP_REJ_ODS_GLOBAL with rejected lines. Check log $log_file for details."
