@@ -1,33 +1,122 @@
+#!/bin/ksh
+
+# Function to display the usage of the script in French
+show_usage() {
+    echo "Utilisation: $0 [-count] [-clean <nombre_delimiteurs_valides>] [-vertica] [-removeorigin] [-delimiter <delimiter>] <fichier_entree>"
+    echo "Options:"
+    echo "  -count                 Compter les lignes et les délimiteurs dans le fichier."
+    echo "  -clean                 Nettoyer le fichier en fonction du nombre de délimiteurs, en conservant uniquement les lignes avec le nombre spécifié."
+    echo "  -vertica               Insérer les enregistrements dans la table Vertica pour les lignes rejetées."
+    echo "  -removeorigin          Supprimer le fichier original après le traitement."
+    echo "  -delimiter             Spécifier le délimiteur utilisé dans le fichier (par défaut, ';')."
+    echo "Exemple:"
+    echo "  $0 -clean 5 -vertica -removeorigin -delimiter ';' mon_fichier.csv"
+}
+
+# Initialize variables
+count_flag=0
+clean_flag=0
+vertica_flag=0
+remove_origin_flag=0
+valid_delimiter_count=0
+custom_delimiter=";" # Default delimiter
+FULLFILENAME=""
+
+# Load configurations
+. /app/list/sd/sid/rct1/conf/mapr/ods/properties/sidlogparams.properties
+
+# Parse command-line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h | --help)
+            show_usage
+            exit 0
+            ;;
+        -count)
+            count_flag=1
+            shift
+            ;;
+        -clean)
+            clean_flag=1
+            valid_delimiter_count="$1"
+            shift
+            ;;
+        -vertica)
+            vertica_flag=1
+            shift
+            ;;
+        -removeorigin)
+            remove_origin_flag=1
+            shift
+            ;;
+        -delimiter)
+            shift
+            custom_delimiter="$1"
+            shift
+            ;;
+        *)
+            FULLFILENAME="$1"
+            shift
+            ;;
+    esac
+done
+
+# Check if the input file is provided and exists
+if [[ -z "$FULLFILENAME" || ! -f "$FULLFILENAME" ]]; then
+    echo "Erreur : Fichier d'entrée non fourni ou n'existe pas."
+    show_usage
+    exit 1
+fi
+
+# Function to process and clean the file
+process_file() {
+    mkdir -p okfile
+    valid_file="okfile/valid_$(basename "$FULLFILENAME")"
+    invalid_file="okfile/invalid_$(basename "$FULLFILENAME")"
+    current_date=$(date +%Y-%m-%d)  # Get current date for DT_DREJET
+    filename=$(basename "$FULLFILENAME")  # Extract filename for LB_FILENAME
+    tablename="HelloMohamed"  # Static value for LB_NOMTABLE
+    >"$valid_file"
+    >"$invalid_file"
+
+    awk -F"$custom_delimiter" -v valid_count=$valid_delimiter_count -v date="$current_date" -v filename="$filename" -v tablename="$tablename" '{
+        if(NF-1 != valid_count) {
+            print NR, $0, filename, date, tablename >> "'$invalid_file'"  # Prepend row number and append additional fields
+        } else {
+            print $0 >> "'$valid_file'"
+        }
+    }' OFS="$custom_delimiter" "$FULLFILENAME"
+
+    # Output counts
+    total_valid_lines=$(wc -l < "$valid_file")
+    total_rejected_lines=$(wc -l < "$invalid_file")
+    echo "Fichier nettoyé enregistré dans $valid_file"
+    echo "Lignes valides : $total_valid_lines"
+    echo "Lignes rejetées : $total_rejected_lines"
+}
+
 # Function to insert rejected lines into the Vertica table
 bulk_insert_to_vertica() {
     invalid_file="okfile/invalid_$(basename "$FULLFILENAME")"
     if [[ $vertica_flag -eq 1 && -s "$invalid_file" ]]; then
-        echo "Inserting rejected lines into Vertica..."
-        ${GpVsql}vsql -h ${GsDWHbaseHostsql} -B ${backup} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -t -c "COPY $GsDWHbaseSchema.T_APP_REJ_ODS_GLOBAL(LB_COLUMN, DT_DREJET) FROM LOCAL '$invalid_file' DELIMITER E'$custom_delimiter' ENFORCELENGTH DIRECT;"
-        if [[ $? -eq 0 ]]; then  # Check if the COPY command was successful
-            ${GpVsql}vsql -h ${GsDWHbaseHostsql} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -c "COMMIT;"  # Explicitly commit the transaction
-            echo "Insertion and commit complete."
-        else
-            echo "Error during COPY operation, rollback initiated."
-            ${GpVsql}vsql -h ${GsDWHbaseHostsql} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -c "ROLLBACK;"  # Rollback if there was an error
-        fi
+        ${GpVsql}vsql -h ${GsDWHbaseHostsql} -B ${backup} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -t -c "COPY $GsDWHbaseSchema.T_APP_REJ_ODS_GLOBAL(NB_ROWNUM, LB_COLUMN, LB_FILENAME, DT_DREJET, LB_NOMTABLE) FROM LOCAL '$invalid_file' DELIMITER E'$custom_delimiter' ENFORCELENGTH DIRECT;"
+        echo "Insertion complete."
     fi
 }
 
+# Main script execution
+if [[ $count_flag -eq 1 ]]; then
+    count_delimiters
+fi
 
-
-
-# Function to insert rejected lines into the Vertica table
-bulk_insert_to_vertica() {
-    invalid_file="okfile/invalid_$(basename "$FULLFILENAME")"
-    if [[ $vertica_flag -eq 1 && -s "$invalid_file" ]]; then
-        echo "Inserting rejected lines into Vertica..."
-        ${GpVsql}vsql -h ${GsDWHbaseHostsql} -B ${backup} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -t -c "COPY $GsDWHbaseSchema.T_APP_REJ_ODS_GLOBAL(LB_COLUMN, DT_DREJET) FROM LOCAL '$invalid_file' DELIMITER E'$custom_delimiter' ENFORCELENGTH DIRECT;"
-        if [[ $? -eq 0 ]]; then  # Check if the COPY command was successful
-            echo "Insertion complete."
-        else
-            echo "Error during COPY operation."
-            # No need for rollback, Vertica handles it in case of COPY failure.
-        fi
+if [[ $clean_flag -eq 1 ]]; then
+    process_file
+    if [[ $remove_origin_flag -eq 1 ]]; then
+        rm -f "$FULLFILENAME"
+        echo "Fichier original supprimé."
     fi
-}
+fi
+
+if [[ $vertica_flag -eq 1 ]]; then
+    bulk_insert_to_vertica
+fi
