@@ -1,0 +1,42 @@
+for filesEntree in ${FICHIERS_COURANTS[@]}
+do
+
+add2Log 0 "Controle de structure sur le fichier: "`basename ${filesEntree}`" a debute"
+
+#echo "Entree dans structureFic"
+        # On parcourt les scripts a executer
+        while read ligne
+        do
+                # Recuperation des paramètres a passer aux shells
+                NomShell=`echo $ligne | cut -d '|' -f1`
+                ParamsShell=`echo $ligne | cut -d '|' -f2`
+                MSGCtrl=`echo $ligne | cut -d '|' -f3`
+                PrioritaireCtrl=`echo $ligne | cut -d '|' -f4`
+                MessageKO=""
+                NomFichierEntrant=${filesEntree}
+
+                if [[ ! ${PrioritaireCtrl} == *PRIORITAIRE_CTRL* ]]
+                then
+                        #echo "Controle "$NomShell
+                        # Execution du shell
+                        eval . ${GpPathProjet}${GpProgramShell}${NomShell} ${ParamsShell}
+
+                        # Recuperation du code de retour et comportement a adapter
+                        if [ ! "${MessageKO}" == "" ] ; then
+                                echo "Control ${NomShell} - Erreur: ${MessageKO}"       >> ${RepLogTraitement}
+                                add2Log 3 "Erreur ${NomShell} - ${MessageKO}"
+                                archiveFic "KO" ${NomFichierEntrant} "STRUCT"
+                                break 1
+                        else
+                                add2Log 0 "Control ${NomShell}: ${NomFichierEntrant} a passe avec OK"
+                        fi
+                fi
+        done < ${T_ADM_CONTROLE_FIC}
+add2Log 0 "Controle de structure sur le fichier: "`basename ${filesEntree}`" a termine"
+# TCM-13236
+if [ "$Produit" == "boa_dam" ] || [ "$Produit" == "boa_rejdam" ] || [ "$Produit" == "boa_divergence" ]
+then
+        mv ${PathProjet}${GpEntree}${filesEntree} ${PathProjet}${GpEntree}${filesEntree}"_CTRLSTRUCTOK"
+fi
+done
+
