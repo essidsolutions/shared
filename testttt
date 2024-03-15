@@ -9,7 +9,7 @@ BACKUP="backup_option"
 show_usage() {
     echo "Usage: $0 <Project Path> <Product> <File List> [-d custom_delimiter] [-v valid_count] [-b backup] [-m make_backup]"
     echo "Example:"
-    echo "  $0 /app/list/sd/sid/dev1/ sepa /path/to/filelist.txt -d , -v 10 -b backup_option -m 1"
+    echo "  $0 /app/list/sd/sid/dev1/ sepa /path/to/filenames.txt -d , -v 10 -b backup_option -m 1"
 }
 
 # Parse flags
@@ -35,7 +35,7 @@ fi
 
 GpPathProjet="$1"
 Produit="$2"
-file_list="$3"  # Path to the file containing the list of files to be processed
+file_list="$3"  # Path to the file containing the list of filenames
 
 # Load configurations dynamically based on the project path
 . "${GpPathProjet}conf/mapr/ods/properties/sidlogparams.properties"
@@ -68,15 +68,15 @@ function get_nomtable {
     echo "${nomtable}"
 }
 
-# Function to process and clean each file in the list
+# Function to process and clean each file
 function process_single_file {
     fichier_entree="$1"
     GpPathProjet="$2"
     Produit="$3"
     LB_NOMTABLE=$(get_nomtable "${Produit}")
-    log_file="${GpPathProjet}log/logfile_purgealim.log"
-    valid_file="${GpPathProjet}entree/valid_$(basename "${fichier_entree}")"
-    invalid_file="${GpPathProjet}entree/invalid_$(basename "${fichier_entree}")"
+    log_file="${GpPathProjet}/log/logfile_purgealim.log"
+    valid_file="${GpPathProjet}/entree/${Produit}/valid_$(basename "${fichier_entree}")"
+    invalid_file="${GpPathProjet}/entree/${Produit}/invalid_$(basename "${fichier_entree}")"
     current_date=$(date +%Y-%m-%d)
 
     >"${valid_file}"
@@ -122,9 +122,10 @@ function process_single_file {
     fi
 }
 
-# Function to process files from the list
+# Function to process files from the list, prepending path project and product to filenames
 function process_files {
-    while IFS= read -r fichier_entree; do
+    while IFS= read -r filename; do
+        fichier_entree="${GpPathProjet}/entree/${Produit}/${filename}"  # Construct the full path
         if [[ -f "$fichier_entree" ]]; then
             echo "Processing file: $fichier_entree"
             process_single_file "$fichier_entree" "$GpPathProjet" "$Produit"
