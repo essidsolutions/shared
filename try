@@ -1,0 +1,78 @@
+#!/bin/ksh
+
+# Default values for the parameters
+MAKE_BACKUP=1
+CUSTOM_DELIMITER=";"
+VALID_COUNT=20
+BACKUP="backup_option"
+
+show_usage() {
+    echo "Usage: $0 <Project Path> <Product> <File to Process> [-d custom_delimiter] [-v valid_count] [-b backup] [-m make_backup]"
+    echo "Example:"
+    echo "  $0 /app/list/sd/sid/dev1/ sepa /path/to/somefile.txt -d , -v 10 -b backup_option"
+}
+
+# Parse flags
+while getopts "d:v:b:m:" opt; do
+    case "$opt" in
+    d) CUSTOM_DELIMITER="$OPTARG" ;;
+    v) VALID_COUNT="$OPTARG" ;;
+    b) BACKUP="$OPTARG" ;;
+    m) MAKE_BACKUP="$OPTARG" ;;
+    ?) show_usage
+       exit 1 ;;
+    esac
+done
+
+# Remove the flags and their corresponding values from the arguments
+shift $((OPTIND -1))
+
+# Validate input arguments
+if [[ $# -ne 3 ]]; then
+    show_usage
+    exit 1
+fi
+
+GpPathProjet="$1"
+Produit="$2"
+fichier_entree="$3"  # This script is now designed to process this single file
+
+# Rest of your script setup functions (like gestion_vertica and get_nomtable)
+
+# Function to process and clean the file, using the global parameters for customization.
+function process_single_file {
+    fichier_entree="$1"
+    GpPathProjet="$2"
+    Produit="$3"
+    LB_NOMTABLE=$(get_nomtable "${Produit}")
+    log_file="${GpPathProjet}log/logfile_purgealim.log"
+    # Define output files
+    valid_file="${GpPathProjet}entree/valid_$(basename "${fichier_entree}")"
+    invalid_file="${GpPathProjet}entree/invalid_$(basename "${fichier_entree}")"
+    current_date=$(date +%Y-%m-%d)
+
+    >"${valid_file}"
+    >"${invalid_file}"
+
+    # Process file and classify lines as valid or invalid
+    awk -F"${CUSTOM_DELIMITER}" -v valid_count="${VALID_COUNT}" -v date="${current_date}" -v filename="${fichier_entree}" -v tablename="${LB_NOMTABLE}" '{
+        if(NF-1 == valid_count) {
+            print $0 >> "'${valid_file}'"
+        } else {
+            print NR, $0, filename, date, tablename >> "'${invalid_file}'"
+        }
+    }' OFS="|" "${fichier_entree}"
+
+    echo "File processed: ${fichier_entree}"
+    echo "Valid lines saved to: ${valid_file}"
+    echo "Invalid lines saved to: ${invalid_file}"
+
+    # Logic for Vertica insertion and file handling remains the same
+    # Make sure to update this section according to your needs
+}
+
+# Dynamically load configurations based on the project path
+. "${GpPathProjet}conf/mapr/ods/properties/sidlogparams.properties"
+
+# Process the single file
+process_single_file "${fichier_entree}" "${GpPathProjet}" "${Produit}"
