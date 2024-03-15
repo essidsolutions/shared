@@ -1,0 +1,133 @@
+#!/bin/ksh
+
+# Default values for the parameters
+MAKE_BACKUP=1
+CUSTOM_DELIMITER=";"
+VALID_COUNT=20
+BACKUP="backup_option"
+
+show_usage() {
+    echo "Usage: $0 <Project Path> <Product> <File List> [-d custom_delimiter] [-v valid_count] [-b backup] [-m make_backup]"
+    echo "Example:"
+    echo "  $0 /app/list/sd/sid/dev1/ sepa /path/to/filenames.txt -d , -v 10 -b backup_option -m 1"
+}
+
+# Parse flags
+while getopts "d:v:b:m:" opt; do
+    case "$opt" in
+    d) CUSTOM_DELIMITER="$OPTARG" ;;
+    v) VALID_COUNT="$OPTARG" ;;
+    b) BACKUP="$OPTARG" ;;
+    m) MAKE_BACKUP="$OPTARG" ;;
+    ?) show_usage
+       exit 1 ;;
+    esac
+done
+
+# Remove the flags and their corresponding values from the arguments
+shift $((OPTIND -1))
+
+# Validate input arguments
+if [[ $# -ne 3 ]]; then
+    show_usage
+    exit 1
+fi
+
+GpPathProjet="$1"
+Produit="$2"
+file_list="$3"  # Path to the file containing the list of filenames
+
+# Load configurations dynamically based on the project path
+. "${GpPathProjet}conf/mapr/ods/properties/sidlogparams.properties"
+. /app/list/sd/sid/rct1/conf/mapr/ods/properties/sidlogparams.properties
+. /app/list/sd/sid/rct1/entree/bpv_ra01/conf/mapr/ods/properties/sidlogparams.properties
+# Function for setting Vertica environment, adapt as needed
+function gestion_vertica {
+    export LANG="en_US.UTF-8"
+    export LC_COLLATE="en_US.UTF-8"
+    export LC_CTYPE="en_US.UTF-8"
+    export LC_MONETARY="en_US.UTF-8"
+    export LC_NUMERIC="en_US.UTF-8"
+    export LC_TIME="en_US.UTF-8"
+    export LC_MESSAGES="en_US.UTF-8"
+    export LC_ALL="en_US.UTF-8"
+}
+# Setting Vertica and other necessary environments
+gestion_vertica
+
+# Function to get LB_NOMTABLE from Vertica
+function get_nomtable {
+    produit="$1"
+    query="SELECT LB_NomTableODS FROM T_ADM_MaprOdsExtract WHERE SourceSid = '${produit}'"
+    nomtable=$(${GpVsql}vsql -h ${GsDWHbaseHostsql} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -t -c "${query}" | tr -d ' ')
+    echo "${nomtable}"
+}
+
+# Function to process and clean each file
+function process_single_file {
+    fichier_entree="$1"
+    GpPathProjet="$2"
+    Produit="$3"
+    LB_NOMTABLE=$(get_nomtable "${Produit}")
+    log_file="${GpPathProjet}/log/logfile_purgealim.log"
+    valid_file="${GpPathProjet}/entree/${Produit}/valid_$(basename "${fichier_entree}")"
+    invalid_file="${GpPathProjet}/entree/${Produit}/invalid_$(basename "${fichier_entree}")"
+    current_date=$(date +%Y-%m-%d)
+
+    >"${valid_file}"
+    >"${invalid_file}"
+
+    # Process file and classify lines as valid or invalid
+    awk -F"${CUSTOM_DELIMITER}" -v valid_count="${VALID_COUNT}" -v date="${current_date}" -v filename="${fichier_entree}" -v tablename="${LB_NOMTABLE}" '{
+        if(NF-1 == valid_count) {
+            print $0 >> "'${valid_file}'"
+        } else {
+            print NR, $0, filename, date, tablename >> "'${invalid_file}'"
+        }
+    }' OFS="|" "${fichier_entree}"
+
+    echo "File processed: ${fichier_entree}"
+    echo "Valid lines saved to: ${valid_file}"
+    echo "Invalid lines saved to: ${invalid_file}"
+
+    # Insert invalid lines into Vertica
+    if [[ -s "${invalid_file}" ]]; then
+        echo "Attempting to insert invalid lines into Vertica..."
+        ${GpVsql}vsql -h ${GsDWHbaseHostsql} -B ${BACKUP} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -t -c "COPY ${GsDWHbaseSchema}.T_APP_REJ_ODS_GLOBAL(NB_ROWNUM, LB_CONTENU, LB_FILENAME, DT_DREJET, LB_NOMTABLE) FROM LOCAL '$invalid_file' DELIMITER E'|' ENFORCELENGTH DIRECT;" > $log_file 2>&1
+        QUERY_RESULT=$?
+        if [[ $QUERY_RESULT -ne 0 ]]; then
+            echo "ERROR: Failed to update T_APP_REJ_ODS_GLOBAL with rejected lines. Check log $log_file for details."
+        else
+            echo "$(date +"%Y-%m-%d %H:%M:%S") - Rejected lines have been successfully updated in T_APP_REJ_ODS_GLOBAL."
+        fi
+        echo "Vertica insertion completed."
+    fi
+
+    # Remove invalid file after processing
+    rm -f "${invalid_file}"
+
+    # Backup and replace file logic
+    if [[ ${MAKE_BACKUP} -eq 1 ]]; then
+        cp "${fichier_entree}" "${fichier_entree}.backup"
+    fi
+    if [[ -s "${valid_file}" ]]; then
+        mv -f "${valid_file}" "${fichier_entree}"
+    else
+        echo "No valid lines found. Original file not replaced."
+    fi
+}
+
+# Function to process files from the list, prepending path project and product to filenames
+function process_files {
+    while IFS= read -r filename; do
+        fichier_entree="${GpPathProjet}/entree/${Produit}/${filename}"  # Construct the full path
+        if [[ -f "$fichier_entree" ]]; then
+            echo "Processing file: $fichier_entree"
+            process_single_file "$fichier_entree" "$GpPathProjet" "$Produit"
+        else
+            echo "File $fichier_entree not found."
+        fi
+    done < "$1"
+}
+# Call process_files function with the file list
+process_files "$file_list"
