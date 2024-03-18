@@ -1,0 +1,58 @@
+/app/list/sd/sid/rct1/program/shell
+$ cat sd_basu31_0_controle_struct_fic_vide_refact.sh
+#!/usr/bin/ksh
+#
+#  Description ........: REFACTORING - Script de contrôle de la structure des fi                                                                                     chiers
+#  Auteur .............: Sopra Steria
+#  Date de creation ...: 07/2020
+
+# ---------------------- Modification(s) ------------------------------#
+#  @Desc :                                                             #
+#                                                                      #
+# ---------------------------------------------------------------------#
+#  Auteur .............:                                               #
+#  Date de modification ...:                                           #
+# ---------------------------------------------------------------------#
+
+#**************************************************************************
+#
+# Script de contrôle de la structure des fichiers
+#
+# Syntaxe : sd_basu31_0_controle_struct_fic_vide_refact.sh $1 $2"
+#
+# Liste des options
+#
+### $1 : Path Entree
+### $2 : Nom du fichier a controler
+
+
+##################################
+#
+# Codes retour :
+#                 MessageKO - avec le message d'erreur si le fichier est vide
+#
+##################################
+#
+# Modifications :
+# jj/mm/aaaa Description
+#**************************************************************************
+
+
+################################################################################                                                                                     ###
+#       Initialisation des variables
+################################################################################                                                                                     ###
+
+pathEntree=$1
+Fic=$2
+nomFic=${pathEntree}${Fic}
+
+if [[ -s ${nomFic} ]] ; then
+        MessageKO=""
+else
+        MessageKO="Erreur lors du controle de la structure des fichiers : le fic                                                                                     hier "${nomFic}" est vide."
+fi ;
+
+
+#**************************************************************************
+# Final
+$ *************************************************************************$
