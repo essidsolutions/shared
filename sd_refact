@@ -1,0 +1,645 @@
+#!/usr/bin/ksh
+#
+#  Description ........: REFACTORING - Script pour faire les contrôles des fichi                                                                                                             ers
+#  Auteur .............: Sopra Steria
+#  Date de creation ...: 07/2020
+#  Version          ...: V7.002.005
+
+#**************************************************************************
+#
+# Script pour faire les contrôles des fichiers
+#
+# Syntaxe : sd_basu31_0_controle_fic_refact.sh $1 $2"
+#
+# Liste des options
+#
+### $1 : Path Projet
+### $2 : Produit
+
+##################################
+#
+# Codes retour :  0 si OK
+#                 1 Erreur
+#                 2 Alertes
+#                 3 Exécution impossible
+#
+##################################
+#
+# Modifications :
+# 14/10/2020: TCM-9727 [SID] Transverse - Contrôles des fichiers - Renvoie du co                                                                                                             de OK au lieu de plantage
+# 29/10/2020: Evolution: Modification du message des erreurs. Ajouter le code so                                                                                                             urce du produit.
+# 02/02/2021: TCM-10304 [SID] Transverse - Problème controle de fichiers sur réc                                                                                                             eption multiple
+# 29/03/2023: TCM-13236 [SID] Anomalie controle fichier (sh sd_basu31_0_controle                                                                                                             _fic_refact.sh) (SN4)
+#**************************************************************************
+#set -x
+################################################################################                                                                                                             ###
+#       Fonction Usage
+################################################################################                                                                                                             ###
+function usage
+{
+        print "Syntaxe :"
+    print "sd_basu31_0_controle_fic_refact.sh <Repertoire Projet> <Repertoire Pr                                                                                                             oduit> "
+    print ""
+    print "Exemple :"
+    print "sd_basu31_0_controle_fic_refact.sh /app/list/sd/sid/dev1/ sepa"
+    print ""
+    print "Liste des options :"
+    print ""
+    print "    <Path projet>  : Repertoire racine du projet SID"
+    print "    <Repertoire du produit> : Repertoire contenant les fichiers du pr                                                                                                             oduit"
+
+    exit 3
+}
+################################################################################                                                                                                             ###
+#       Fonction Ajouter log du traitement - add2Log
+################################################################################                                                                                                             ###
+
+function add2Log
+{
+
+        if [ "$1" != "0" ]
+        then
+                # Valeur $1=3 - ERREUR / Valeur $1=1 - ALERTE
+                if [ "$1" != "1" ]
+                then
+
+                        echo `date +"%Y-%m-%d %H:%M:%S"`";${MSGCtrl};FATAL;${Exe                                                                                                             cutionID};${Produit};${Code_appli_source};$2 ($1)" >> ${RepLogErreur}
+                        echo `date +"%Y-%m-%d %H:%M:%S"`";MSG000101;FATAL;$2 ($1                                                                                                             )" >> ${RepLogGlobal}
+
+                else
+                        echo `date +"%Y-%m-%d %H:%M:%S"`";MSG000101;ALERTE;$2" >                                                                                                             > ${RepLogGlobal}
+
+                fi
+
+        else
+
+                        echo `date +"%Y-%m-%d %H:%M:%S"`";MSG000101;INFO;$2" >>                                                                                                              ${RepLogGlobal}
+
+        fi
+
+}
+
+
+################################################################################                                                                                                             ###
+#       Fonction Copier le fichier CFT a SID - copyCFT2Sid
+################################################################################                                                                                                             ###
+
+function copyCFT2Sid
+{
+
+fname=$1
+
+check_file_source=`cksum $fname | cut -d " " -f 1`
+fichier_cible=`echo $fname | sed 's/cft/entree/'`
+
+add2Log 0 "mv de $fname vers $fichier_cible"
+
+mv $fname $fichier_cible
+if [ $? -ne 0 ]
+        then
+                add2Log 1 "Erreur probleme de mv de $fname"
+        else
+                check_fichier_cible=`cksum $fichier_cible | cut -d " " -f 1`
+                if [ $check_file_source -ne $check_fichier_cible ]
+                        then
+                                add2Log 1 "Erreur mv non conforme de $fname ($ch                                                                                                             eck_file_source) vers $fichier_cible ($check_fichier_cible)"
+                        else
+                                add2Log 0 "mv OK de $fname ($check_file_source)                                                                                                              vers $fichier_cible ($check_fichier_cible)"
+                                chmod 777 $fichier_cible
+                                                                nu_fichiers_trai                                                                                                             tes=`expr $nu_fichiers_traites + 1`
+
+                fi
+fi
+
+
+
+}
+
+################################################################################                                                                                                             ###
+#       Fonction Archivage des fichiers - archiveFic
+################################################################################                                                                                                             ###
+
+function archiveFic
+{
+CodeCtrl=$1 # Code Controle: OK ou KO
+NomFichier=$2 # Nom du fichier
+Preffixe=$3
+DTARCHIVE=$(date +%Y%m%d%H%M%S)
+
+if [ "${CodeCtrl}" == "KO" ]
+then
+        mv ${REP_ENTREE}${NomFichier} ${REP_SORTIEKO}${Preffixe}"_KO."${NomFichi                                                                                                             er}
+        $GpPathProjet$GpProgramShell/sid_archive_fic.sh ${REP_SORTIEKO}${Preffix                                                                                                             e}"_KO."${DTARCHIVE}".zip" ${REP_SORTIEKO}${Preffixe}"_KO."${NomFichier}
+        add2Log 0 "Le fichier ${NomFichier} a ete archive sur le repertoire ${RE                                                                                                             P_SORTIEKO}"
+fi
+
+}
+
+################################################################################                                                                                                             ###
+#       Fonction Controle Fichiers deja consommes - ficDejaConsomme
+################################################################################                                                                                                             ###
+
+function ficDejaConsomme
+{
+
+NomFichier=`basename ${1}`
+QUERY_RESULT=$(${GpVsql}vsql -h ${GsDWHbaseHostsql} -B $backup -U ${GsDWHbaseUse                                                                                                             r} -w ${GsDWHbasepswd} -t -c "SELECT DISTINCT 1 AS RESULTAT FROM ${GsDWHbaseSche                                                                                                             ma}.T_ADM_CONTROLE_FIC_CONSO WHERE LB_NomFic LIKE ('%.${NomFichier}') "|tr -d '                                                                                                              ')
+
+if [ "${QUERY_RESULT}" == "" ]
+then
+        add2Log 0 "Controle Fichiers Deja Consommes OK pour le fichier ${NomFich                                                                                                             ier}"
+else
+        add2Log 1 "Fichier deja consomme :  ${NomFichier}"
+        archiveFic "KO" ${NomFichier} "CONS"
+
+fi
+
+
+}
+
+################################################################################                                                                                                             ###
+#       Fonction Gestion de l'encodage Vertica -  gestion_vertica
+################################################################################                                                                                                             ###
+
+function gestion_vertica
+{
+        export LANG="en_US.UTF-8"
+        export LC_COLLATE="en_US.UTF-8"
+        export LC_CTYPE="en_US.UTF-8"
+        export LC_MONETARY="en_US.UTF-8"
+        export LC_NUMERIC="en_US.UTF-8"
+        export LC_TIME="en_US.UTF-8"
+        export LC_MESSAGES="en_US.UTF-8"
+        export LC_ALL="en_US.UTF-8"
+}
+
+################################################################################                                                                                                             ###
+#       Fonction structure des fichiers - structureFicPrioritaire
+################################################################################                                                                                                             ###
+function structureFicPrioritaire
+{
+#set -x
+# On parcourt les fichiers prioritaires dans le repertoire d'entree
+for filesEntree in ${FICHIERS_COURANTS[@]}
+do
+
+add2Log 0 "Controle Prioritaire sur le fichier: "`basename ${filesEntree}`" a de                                                                                                             bute"
+
+        # On parcourt les scripts a executer
+        while read ligne
+        do
+
+
+                # Recuperation des paramètres a passer aux shells
+                NomShell=`echo $ligne | cut -d '|' -f1`
+                ParamsShell=`echo $ligne | cut -d '|' -f2`
+                MSGCtrl=`echo $ligne | cut -d '|' -f3`
+                PrioritaireCtrl=`echo $ligne | cut -d '|' -f4`
+                MessageKO=""
+                NomFichierEntrant=${filesEntree}
+                if [[ ${PrioritaireCtrl} == *PRIORITAIRE_CTRL* ]]
+                then
+                        # Execution du shell
+                        eval . ${GpPathProjet}${GpProgramShell}${NomShell} ${Par                                                                                                             amsShell}
+
+                        # Recuperation du code de retour et comportement a adapt                                                                                                             er
+                        if [ ! "${MessageKO}" == "" ] ; then
+                                echo "Control ${NomShell} - Erreur: ${MessageKO}                                                                                                             "       >> ${RepLogTraitement}
+                                add2Log 3 "Erreur ${NomShell} - ${MessageKO}"
+                                archiveFic "KO" ${NomFichierEntrant} "STRUCT"
+                                break 1
+                        else
+                                add2Log 0 "Control ${NomShell}: ${NomFichierEntr                                                                                                             ant} a passe avec OK"
+                        fi
+                fi
+        done < ${T_ADM_CONTROLE_FIC}
+add2Log 0 "Controle Prioritaire sur le fichier: "`basename ${filesEntree}`" a te                                                                                                             rmine"
+done
+
+
+}
+
+################################################################################                                                                                                             ###
+#       Fonction structure des fichiers - structureFic
+################################################################################                                                                                                             ###
+function structureFic
+{
+#set -x
+# On parcourt les fichier dans le repertoire d'entree
+for filesEntree in ${FICHIERS_COURANTS[@]}
+do
+
+add2Log 0 "Controle de structure sur le fichier: "`basename ${filesEntree}`" a d                                                                                                             ebute"
+
+#echo "Entree dans structureFic"
+        # On parcourt les scripts a executer
+        while read ligne
+        do
+                # Recuperation des paramètres a passer aux shells
+                NomShell=`echo $ligne | cut -d '|' -f1`
+                ParamsShell=`echo $ligne | cut -d '|' -f2`
+                MSGCtrl=`echo $ligne | cut -d '|' -f3`
+                PrioritaireCtrl=`echo $ligne | cut -d '|' -f4`
+                MessageKO=""
+                NomFichierEntrant=${filesEntree}
+
+                if [[ ! ${PrioritaireCtrl} == *PRIORITAIRE_CTRL* ]]
+                then
+                        #echo "Controle "$NomShell
+                        # Execution du shell
+                        eval . ${GpPathProjet}${GpProgramShell}${NomShell} ${Par                                                                                                             amsShell}
+
+                        # Recuperation du code de retour et comportement a adapt                                                                                                             er
+                        if [ ! "${MessageKO}" == "" ] ; then
+                                echo "Control ${NomShell} - Erreur: ${MessageKO}                                                                                                             "       >> ${RepLogTraitement}
+                                add2Log 3 "Erreur ${NomShell} - ${MessageKO}"
+                                archiveFic "KO" ${NomFichierEntrant} "STRUCT"
+                                break 1
+                        else
+                                add2Log 0 "Control ${NomShell}: ${NomFichierEntr                                                                                                             ant} a passe avec OK"
+                        fi
+                fi
+        done < ${T_ADM_CONTROLE_FIC}
+add2Log 0 "Controle de structure sur le fichier: "`basename ${filesEntree}`" a t                                                                                                             ermine"
+# TCM-13236
+if [ "$Produit" == "boa_dam" ] || [ "$Produit" == "boa_rejdam" ] || [ "$Produit"                                                                                                              == "boa_divergence" ]
+then
+        mv ${PathProjet}${GpEntree}${filesEntree} ${PathProjet}${GpEntree}${file                                                                                                             sEntree}"_CTRLSTRUCTOK"
+fi
+done
+
+
+}
+
+################################################################################                                                                                                             ###
+#       Fonction Contrôle d'IDF - controleIDF
+################################################################################                                                                                                             ###
+function controleIDF
+{
+#set -x
+# On parcourt les fichier dans le repertoire d'entree
+for filesEntree in ${FICHIERS_COURANTS[@]}
+do
+        noFichier=`basename ${filesEntree}`
+        add2Log 0 "Controle d'IDF sur le fichier: ${noFichier} a debute"
+        isIDF=""
+
+        while read ligne
+        do
+                if [ "$(echo ${noFichier} | grep ${ligne})" == "$noFichier" ]
+                then
+                        isIDF="0"
+                        break 1
+
+                else
+                        isIDF="1"
+                        MSGCtrl="MSGCTRL0000"
+                fi
+        done < ${FicListeIDF}
+
+        # Recuperation de la valeur du flag
+        if [ "${isIDF}" == "1" ] ; then
+                echo "Control d'IDF - Erreur: Le fichier $noFichier possede un I                                                                                                             DF invalide"    >> ${RepLogTraitement}
+                add2Log 3 "Erreur controle d'IDF: Le fichier $noFichier possede                                                                                                              un IDF invalide."
+                archiveFic "KO" ${noFichier} "IDF"
+        else
+                add2Log 0 "Control d'IDF: ${noFichier} a passe avec OK"
+        fi
+
+        add2Log 0 "Controle d'IDF sur le fichier: ${noFichier} a termine"
+done
+
+
+}
+
+
+################################################################################                                                                                                             ###
+#       Fonction charger le nom de l'application source du produit - chargeAppli                                                                                                             Source
+################################################################################                                                                                                             ###
+function chargeAppliSource
+{
+#set -x
+
+        add2Log 0 "Charge Code de l'application Source a debute"
+        Code_appli_source=""
+        while read ligne
+        do
+                # Recuperation des parametres a passer au log de supervision
+                SourceSid=`echo $ligne |cut -d ';' -f1`
+                if [ "${SourceSid}" == "${Produit}" ]
+                then
+                        Code_appli_source=`echo $ligne |cut -d ';' -f2`
+                fi
+
+
+        done <${FicTRFACodeAppliSource}
+        add2Log 0 "Charge Code de l'application Source a reussi"
+
+
+
+}
+
+################################################################################                                                                                                             ###
+#       Verification des parametres du job de lancement
+################################################################################                                                                                                             ###
+
+# S'il n'y a pas 2 arguments, alors la syntaxe n'est pas correcte
+if [ ${#} -lt 2 -o ${#} -gt 2 ]
+then
+        print "Le nombre d'arguments passe au shell n'est pas correct !"
+        print ""
+        usage
+fi
+
+
+################################################################################                                                                                                             ###
+#       Initialisation des variables
+################################################################################                                                                                                             ###
+
+# Paramètres d'entree
+PathProjet=$1
+Produit=$2
+
+# Des variables calculees
+GpEntree=entree/${Produit}/
+GpEntreeCFT=cft/${Produit}/
+GpSortieKO=sortie/${Produit}ko/
+Datetimestamp=$(date +%Y_%m_%d_%H%M%S)
+flagExit="KO"
+RepLogGlobal=${PathProjet}log/Sid_bi_${Produit}.log
+RepLogErreur=${PathProjet}log/Erreur_Sid_Controle_fichiers.log
+NUM_RANDOM=`echo $((1 + RANDOM % 100000000))`
+NUM_SECONDS=`date +"%s"`
+ExecutionID=${NUM_RANDOM}${NUM_SECONDS}
+
+# Init log
+add2Log 0 "Le traitement sd_basu31_0_controle_fic_refact.sh - ${Produit} a debut                                                                                                             e"
+
+################################################################################                                                                                                             ###
+#       Charge des variables de les properties
+################################################################################                                                                                                             ###
+
+FicSidlogparamsMAPR=${PathProjet}/conf/mapr/ods/properties/sidlogparams.properti                                                                                                             es
+
+if [ -f $FicSidlogparamsMAPR ]
+then
+        . $FicSidlogparamsMAPR
+else
+        add2Log 3 "ERREUR: Le fichier ${FicSidlogparamsMAPR} est introuvable, im                                                                                                             possible de recuperer les paramètres MapR"
+        exit 1
+fi
+
+################################################################################                                                                                                             ###
+#       Verification de l'existance du fichier referentiel T_RFA_CODE_APPLI_SOUR                                                                                                             CE.txt
+################################################################################                                                                                                             ###
+
+FicTRFACodeAppliSource=${PathProjet}data/referentiel/T_RFA_CODE_APPLI_SOURCE.txt
+
+if [ ! -f $FicTRFACodeAppliSource ]
+then
+        add2Log 3 "ERREUR: Le fichier ${FicTRFACodeAppliSource} est introuvable,                                                                                                              impossible de recuperer le referentiel"
+        exit 1
+fi
+
+################################################################################                                                                                                             ###
+#       Echos des variables
+################################################################################                                                                                                             ###
+
+REP_ENTREE_CFT=${GpPathProjet}${GpEntreeCFT}
+REP_ENTREE=${GpPathProjet}${GpEntree}
+REP_SORTIEKO=${GpPathProjet}${GpSortieKO}
+Produit_Upper=`echo ${Produit} |tr '[:lower:]' '[:upper:]'`
+T_ADM_CONTROLE_FIC=${GpPathProjet}${GpEntree}adm/T_ADM_CONTROLE_FIC.txt
+RepLogTraitement=${GpPathProjet}log/${Produit}/LOG_controle_fic_refact_${Datetim                                                                                                             estamp}.txt
+FicListeIDF=${GpPathProjet}conf/${Produit}/properties/${Produit}_IDF_liste.prope                                                                                                             rties
+
+echo "*********************************************************" >> ${RepLogTrai                                                                                                             tement}
+echo "VARIABLES DU SHELL sd_basu31_0_controle_fic_refact"               >> ${Rep                                                                                                             LogTraitement}
+echo "*********************************************************" >> ${RepLogTrai                                                                                                             tement}
+echo "###################################"                                     >                                                                                                             > ${RepLogTraitement}
+echo "#Paramètres pasees au shell"                                             >                                                                                                             > ${RepLogTraitement}
+echo "###################################"                                     >                                                                                                             > ${RepLogTraitement}
+echo "PathProjet=${PathProjet}"                                                >                                                                                                             > ${RepLogTraitement}
+echo "Produit=${Produit}"                                                      >                                                                                                             > ${RepLogTraitement}
+echo "*********************************************************" >> ${RepLogTrai                                                                                                             tement}
+echo "#Paramètres calculees au shell"                                          >                                                                                                             > ${RepLogTraitement}
+echo "*********************************************************" >> ${RepLogTrai                                                                                                             tement}
+echo "GpEntree=${GpEntree}"                                                    >                                                                                                             > ${RepLogTraitement}
+echo "FicSidlogparamsMAPR=${FicSidlogparamsMAPR}"                              >                                                                                                             > ${RepLogTraitement}
+echo "FicTRFACodeAppliSource=${FicTRFACodeAppliSource}"                        >                                                                                                             > ${RepLogTraitement}
+echo "GpEntreeCFT=${GpEntreeCFT}"                                              >                                                                                                             > ${RepLogTraitement}
+echo "REP_ENTREE_CFT=${REP_ENTREE_CFT}"                                        >                                                                                                             > ${RepLogTraitement}
+echo "REP_ENTREE=${REP_ENTREE}"                                                >                                                                                                             > ${RepLogTraitement}
+echo "REP_SORTIEKO=${REP_SORTIEKO}"                                            >                                                                                                             > ${RepLogTraitement}
+echo "RepLogGlobal=${RepLogGlobal}"                                            >                                                                                                             > ${RepLogTraitement}
+echo "RepLogTraitement=${RepLogTraitement}"                                    >                                                                                                             > ${RepLogTraitement}
+echo "*********************************************************" >> ${RepLogTrai                                                                                                             tement}
+
+################################################################################                                                                                                             ###
+#       Charge du referentiel T_RFA_CODE_APPLI_SOURCE.txt
+################################################################################                                                                                                             ###
+
+chargeAppliSource
+
+
+################################################################################                                                                                                             ###
+#       Deplacer les fichiers de CFT a Entree (SID)
+################################################################################                                                                                                             ###
+
+add2Log 0 "L'etape pour copier le fichier CFT a Entree SID - ${Produit} a debute                                                                                                             "
+
+# Creation du fichier avec les noms des fichiers au lancement du programme
+set -A FICHIERS_COURANTS `ls -p ${REP_ENTREE_CFT} | grep -v /| grep -v .tmp$|gre                                                                                                             p -v "_CTRLSTRUCTOK"`
+
+# Nombre des fichiers a traiter
+nu_fichiers_a_traiter=`ls -p ${REP_ENTREE_CFT}| grep -v / | grep -v .tmp$|grep -                                                                                                             v "_CTRLSTRUCTOK" |wc -l|awk '{print$1}'`
+
+# Init Nombre des fichiers traites
+nu_fichiers_traites=0
+
+# Logs
+add2Log 0 "copyCFT2Sid: Nombre des fichiers a traiter ${nu_fichiers_a_traiter} -                                                                                                              ${Produit}"
+echo "copyCFT2Sid:"                             >> ${RepLogTraitement}
+echo "nu_fichiers_a_traiter=${nu_fichiers_a_traiter}"                          >                                                                                                             > ${RepLogTraitement}
+
+# Boucle fichiers a traiter
+for fichier_a_traiter in ${FICHIERS_COURANTS[@]}
+do
+     copyCFT2Sid ${REP_ENTREE_CFT}${fichier_a_traiter}
+done
+
+add2Log 0 "copyCFT2Sid: Nombre des fichiers traites ${nu_fichiers_traites} de ${                                                                                                             nu_fichiers_a_traiter}- ${Produit}"
+
+# Verification nombre des fichiers traites
+if [ ${nu_fichiers_traites} -ne 0 ]
+then
+        add2Log 0 "Le traitement pour copier le fichier CFT a Entree SID - ${Pro                                                                                                             duit} a reussi"
+        echo "nu_fichiers_traites=${nu_fichiers_traites}"                      >                                                                                                             > ${RepLogTraitement}
+else
+        add2Log 1 "L'etape pour copier le fichier CFT a Entree SID - ${Produit}                                                                                                              a termine avec 0 fichiers valides"
+        add2Log 1 "Le traitement Le traitement sd_basu31_0_controle_fic_refact.s                                                                                                             h - ${Produit} a fini"
+        exit 0
+fi
+
+################################################################################                                                                                                             ###
+#       Controle d'IDF
+################################################################################                                                                                                             ###
+
+add2Log 0 "L'etape du controle d'IDF - ${Produit} a debute"
+
+# Verification fichier FicListeIDF
+if [ ! -f $FicListeIDF ]
+then
+        touch $FicListeIDF
+fi
+
+# MAJ de la liste des fichiers a traiter
+unset FICHIERS_COURANTS
+set -A FICHIERS_COURANTS `ls -p ${REP_ENTREE} | grep -v /|grep -v "_CTRLSTRUCTOK                                                                                                             "`
+nu_fichiers_a_traiter=`ls -p ${REP_ENTREE}| grep -v /|grep -v "_CTRLSTRUCTOK" |w                                                                                                             c -l|awk '{print$1}'`
+
+echo "controleIDF:"                             >> ${RepLogTraitement}
+echo "nu_fichiers_a_traiter=${nu_fichiers_a_traiter}"                          >                                                                                                             > ${RepLogTraitement}
+
+# Execution ctrls IDF des fichiers
+controleIDF
+
+nu_fichiers_traites=`ls -p ${REP_ENTREE}| grep -v /|grep -v "_CTRLSTRUCTOK" |wc                                                                                                              -l|awk '{print$1}'`
+add2Log 0 "Controle d'IDF: Nombre des fichiers qui ont bien passe le controle ${                                                                                                             nu_fichiers_traites} de ${nu_fichiers_a_traiter}- ${Produit}"
+
+# Verification nombre des fichiers traites
+if [ ${nu_fichiers_traites} -ne 0 ]
+then
+        add2Log 0 "L'etape du controle d'IDF - ${Produit} a reussi"
+        echo "nu_fichiers_traites=${nu_fichiers_traites}"                      >                                                                                                             > ${RepLogTraitement}
+else
+        add2Log 1 "L'etape du controle d'IDF - ${Produit} a termine avec 0 fichi                                                                                                             ers valides"
+        add2Log 1 "Le traitement Le traitement sd_basu31_0_controle_fic_refact.s                                                                                                             h - ${Produit} a fini"
+        exit 0
+fi
+
+
+
+################################################################################                                                                                                             ####
+##      Controle Prioritaire des fichiers
+################################################################################                                                                                                             ####
+
+add2Log 0 "L'etape du controle prioritaire des fichiers - ${Produit} a debute"
+
+# Verification fichier T_ADM_CONTROLE_FIC
+if [ ! -f $T_ADM_CONTROLE_FIC ]
+then
+        touch $T_ADM_CONTROLE_FIC
+fi
+
+# MAJ de la liste des fichiers a traiter
+unset FICHIERS_COURANTS
+set -A FICHIERS_COURANTS `ls -p ${REP_ENTREE} | grep -v /|grep -v "_CTRLSTRUCTOK                                                                                                             "`
+nu_fichiers_a_traiter=`ls -p ${REP_ENTREE}| grep -v /|grep -v "_CTRLSTRUCTOK" |w                                                                                                             c -l|awk '{print$1}'`
+
+echo "Ctrl Prioritare:"                         >> ${RepLogTraitement}
+echo "nu_fichiers_a_traiter=${nu_fichiers_a_traiter}"                          >                                                                                                             > ${RepLogTraitement}
+
+
+# Execution ctrls structures des fichiers
+structureFicPrioritaire
+
+nu_fichiers_traites=`ls -p ${REP_ENTREE}| grep -v /|grep -v "_CTRLSTRUCTOK" |wc                                                                                                              -l|awk '{print$1}'`
+add2Log 0 "Controle Prioritaire Fic: Nombre des fichiers qui ont bien passe le c                                                                                                             ontrole ${nu_fichiers_traites} de ${nu_fichiers_a_traiter}- ${Produit}"
+
+
+
+################################################################################                                                                                                             ###
+#       Controle Fichiers deja consommes
+################################################################################                                                                                                             ###
+
+add2Log 0 "L'etape de verification des fichiers deja consommes - ${Produit} a de                                                                                                             bute"
+
+# MAJ de la liste des fichiers a traiter
+unset FICHIERS_COURANTS
+set -A FICHIERS_COURANTS `ls -p ${REP_ENTREE} | grep -v /|grep -v "_CTRLSTRUCTOK                                                                                                             "`
+nu_fichiers_a_traiter=`ls -p ${REP_ENTREE}| grep -v / |grep -v "_CTRLSTRUCTOK"|w                                                                                                             c -l|awk '{print$1}'`
+
+echo "ficDejaConsomme:"                         >> ${RepLogTraitement}
+echo "nu_fichiers_a_traiter=${nu_fichiers_a_traiter}"                          >                                                                                                             > ${RepLogTraitement}
+
+# Init Des Variables Vertica
+gestion_vertica
+
+# Execution du ctrl fichier conso
+for fichier_a_traiter in ${FICHIERS_COURANTS[@]}
+do
+     ficDejaConsomme ${REP_ENTREE}${fichier_a_traiter}
+done
+
+nu_fichiers_traites=`ls -p ${REP_ENTREE}| grep -v / |grep -v "_CTRLSTRUCTOK"|wc                                                                                                              -l|awk '{print$1}'`
+add2Log 0 "Controle Fichiers Deja Consommes: Nombre des fichiers qui ont bien pa                                                                                                             sse le controle ${nu_fichiers_traites} de ${nu_fichiers_a_traiter}- ${Produit}"
+
+# Verification nombre des fichiers traites
+if [ ${nu_fichiers_traites} -ne 0 ] ||[ ${nu_fichiers_a_traiter} -eq ${nu_fichie                                                                                                             rs_traites} ]
+then
+        add2Log 0 "L'etape de verification des fichiers deja consommes - ${Produ                                                                                                             it} a reussi"
+        echo "nu_fichiers_traites=${nu_fichiers_traites}"                      >                                                                                                             > ${RepLogTraitement}
+else
+        add2Log 1 "L'etape de verification des fichiers deja consommes - ${Produ                                                                                                             it} a termine avec 0 fichiers valides"
+        add2Log 1 "Le traitement Le traitement sd_basu31_0_controle_fic_refact.s                                                                                                             h - ${Produit} a fini"
+        exit 0
+fi
+
+
+################################################################################                                                                                                             ####
+##      Controle structure des fichiers
+################################################################################                                                                                                             ####
+
+add2Log 0 "L'etape du controle de structure des fichiers - ${Produit} a debute"
+
+# Verification fichier T_ADM_CONTROLE_FIC
+if [ ! -f $T_ADM_CONTROLE_FIC ]
+then
+        touch $T_ADM_CONTROLE_FIC
+fi
+
+# MAJ de la liste des fichiers a traiter
+unset FICHIERS_COURANTS
+set -A FICHIERS_COURANTS `ls -p ${REP_ENTREE} | grep -v /|grep -v "_CTRLSTRUCTOK                                                                                                             "`
+nu_fichiers_a_traiter=`ls -p ${REP_ENTREE}| grep -v /|grep -v "_CTRLSTRUCTOK" |w                                                                                                             c -l|awk '{print$1}'`
+
+echo "structureFic:"                            >> ${RepLogTraitement}
+echo "nu_fichiers_a_traiter=${nu_fichiers_a_traiter}"                          >                                                                                                             > ${RepLogTraitement}
+
+# Creation de fichier pour le controle sd_basu31_0_controle_struct_fic_identique                                                                                                             _refact.sh
+FILE_LISTECOURANTE=${GpPathProjet}'data/tmp/Fichiers_'${Produit}'_ListeCouranteF                                                                                                             iles.txt'
+if [ -f ${FILE_LISTECOURANTE} ]
+then
+        rm ${FILE_LISTECOURANTE}
+fi
+touch ${FILE_LISTECOURANTE}
+
+for j in ${FICHIERS_COURANTS[@]}
+do
+     echo $j >>${FILE_LISTECOURANTE}
+done
+
+# Execution ctrls structures des fichiers
+structureFic
+
+nu_fichiers_traites=`ls -p ${REP_ENTREE}| grep -v / |grep -v "_CTRLSTRUCTOK"|wc                                                                                                              -l|awk '{print$1}'`
+add2Log 0 "Controle Structure Fic: Nombre des fichiers qui ont bien passe le con                                                                                                             trole ${nu_fichiers_traites} de ${nu_fichiers_a_traiter}- ${Produit}"
+
+# Verification nombre des fichiers traites
+if [ ${nu_fichiers_traites} -ne 0 ]
+then
+        add2Log 0 "L'etape du controle de structure des fichiers - ${Produit} a                                                                                                              reussi"
+        echo "nu_fichiers_traites=${nu_fichiers_traites}"                      >                                                                                                             > ${RepLogTraitement}
+else
+        add2Log 1 "L'etape du controle de structure des fichiers - ${Produit} a                                                                                                              termine avec 0 fichiers valides"
+        add2Log 1 "Le traitement Le traitement sd_basu31_0_controle_fic_refact.s                                                                                                             h - ${Produit} a fini"
+        exit 0
+fi
+
+# Fin log
+add2Log 0 "Le traitement Le traitement sd_basu31_0_controle_fic_refact.sh - ${Pr                                                                                                             oduit} a reussi"
+exit 0
+#**************************************************************************
+# Final
+#**************************************************************************
