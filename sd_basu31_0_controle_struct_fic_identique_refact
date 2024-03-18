@@ -1,0 +1,47 @@
+# Codes retour :
+#                 MessageKO - avec le message d'erreur si le fichier contient la Structure en doublon
+#
+##################################
+#
+# Modifications :
+# jj/mm/aaaa Description
+#**************************************************************************
+
+
+###################################################################################
+#       Initialisation des variables
+###################################################################################
+
+pathEntree=$1
+nomFic=$2
+LISTECOURANTE_FILE=$3
+
+# Calcul du md5sum pour le fichier de référence
+ID_unique=$(md5sum ${pathEntree}${nomFic} | cut -d' ' -f1)
+
+# Récupération de la liste des fichiers sur laquelle faire les comparaisons
+set -A FILES $(< ${LISTECOURANTE_FILE})
+
+# On cherche l'indice du fichier dans la liste des fichiers du répertoires
+integer indexFileParam=0
+while [[ $indexFileParam -lt ${#FILES[@]} ]]
+do
+        if [ "${FILES[indexFileParam]}" = "${nomFic}" ]; then
+                (( indexFileParam = indexFileParam + 1 )); break
+        fi
+(( indexFileParam = indexFileParam + 1 )); done
+
+# On cherche des doublons
+for i in `seq $indexFileParam $(expr ${#FILES[@]} - 1)`
+do
+        ID_courant=$(md5sum ${pathEntree}${FILES[i]} | cut -d' ' -f1)
+        if [ "${ID_courant}" = "${ID_unique}" ]; then
+                MessageKO="Erreur lors du contrôle de la structure des fichiers : le fichier "${pathEntree}${nomFic}" est identique au fichier "${pathEntree}${FILES[i]}"."
+                # Si on a un doublon, on génère un KO ...
+                break 1
+        fi
+done
+
+#**************************************************************************
+# Final
+#**************************************************************************
