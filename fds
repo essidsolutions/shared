@@ -1,0 +1,149 @@
+#!/bin/ksh
+echo "======================================================================================="
+echo "[+] STARTING : Purge Alim Process"
+echo "======================================================================================="
+
+# Default values for the parameters
+customDelimiter=";"
+validDelimiterCount=20
+
+show_usage() {
+    echo "Usage: $0 <Project Path> <Product> <File List> [-d custom_delimiter] [-v valid_count]"
+    echo "Example:"
+    echo "  $0 /path/to/project/ sepa /path/to/filenames -d , -v 10"
+}
+
+# Parse flags
+while getopts "d:v:" opt; do
+    case "$opt" in
+    d) customDelimiter="$OPTARG" ;;
+    v) validDelimiterCount="$OPTARG" ;;
+    ?)
+        show_usage
+        exit 1
+        ;;
+    esac
+done
+
+# Remove the flags and their corresponding values from the arguments
+shift $((OPTIND - 1))
+
+# Validate input arguments
+if [[ $# -ne 3 ]]; then
+    show_usage
+    exit 1
+fi
+
+
+
+path_entryProject=$(echo "$1" | sed 's|//|/|g')  # Normalize the path
+nomProduit="$2"
+listFilesCourant="$3" # Path to the file containing the list of filenames
+# Load configurations dynamically based on the project path
+normalized_path_entryProject=$(echo "${path_entryProject}" | sed 's|//|/|g')  # Replace double slashes with a single one
+normalized_path_entryProject=$(echo "${normalized_path_entryProject}" | sed 's|/$||')  # Remove trailing slash if present
+
+# Then construct the full path for the properties file
+config_path="${normalized_path_entryProject}/conf/mapr/ods/properties/sidlogparams.properties"
+echo "[+] Loading Config File: ${config_path}"
+
+#. "${config_path}"
+# Function for setting Vertica environment, adapt as needed
+function gestion_vertica {
+    export LANG="en_US.UTF-8"
+    export LC_COLLATE="en_US.UTF-8"
+    export LC_CTYPE="en_US.UTF-8"
+    export LC_MONETARY="en_US.UTF-8"
+    export LC_NUMERIC="en_US.UTF-8"
+    export LC_TIME="en_US.UTF-8"
+    export LC_MESSAGES="en_US.UTF-8"
+    export LC_ALL="en_US.UTF-8"
+}
+
+# Setting Vertica and other necessary environments
+gestion_vertica
+
+# Function to get LB_NOMTABLE from Vertica
+function func_getNomTableOds {
+    nomProduit="$1"
+    getTableName_query="SELECT LB_NomTableODS FROM T_ADM_MaprOdsExtract WHERE SourceSid = '${nomProduit}'"
+    nomTableOds=$(${GpVsql}vsql -h ${GsDWHbaseHostsql} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd} -t -c "${getTableName_query}" | tr -d ' ')
+    echo "${nomTableOds}"
+}
+
+# Function to process and clean each file
+function func_processSingleFile {
+    echo "========================================================================================"
+    path_entryProject=$(echo "$1" | sed 's|//|/|g') # Normalize the path
+    nomProduit="$2"
+    path_entryFile=$(echo "$3" | sed 's|//|/|g') # Normalize the path
+    var_nomTableOds=$(func_getNomTableOds "${nomProduit}")
+    _path_saveLogFile="${path_entryProject}/log/logfile_purgealim.log"
+    path_saveLogFile=$(echo "$_path_saveLogFile" | sed 's|//|/|g')
+    _path_saveValidFile="${path_entryProject}/valid_$(basename "${path_entryFile}")"
+    path_saveValidFile=$(echo "$_path_saveValidFile" | sed 's|//|/|g')
+    _path_saveInvalidFile="${path_entryProject}/invalid_$(basename "${path_entryFile}")"
+    path_saveInvalidFile=$(echo "$_path_saveInvalidFile" | sed 's|//|/|g')
+    TodayCurrentDate=$(date +%Y-%m-%d)
+    
+    >"${path_saveValidFile}"
+    >"${path_saveInvalidFile}"
+
+    fihier_a_traiter="${path_entryProject}/${path_entryFile}"
+    # Process file and classify lines as valid or invalid
+    awk -F"${customDelimiter}" -v valid_count="${validDelimiterCount}" -v date="${TodayCurrentDate}" -v filename="$fihier_a_traiter" -v tablename="${var_nomTableOds}" '{
+        if(NF-1 == valid_count) {
+            print $0 >> "'${path_saveValidFile}'"
+        } else {
+            print NR, $0, filename, date, tablename >> "'${path_saveInvalidFile}'"
+        }
+    }' OFS="|" "${path_entryFile}"
+
+    echo "========================================================================================"
+    echo "File Processing Completed"
+    echo "========================================================================================"
+    echo "[+] File processed: ${path_entryFile}"
+    echo "[+] Valid lines saved to: ${path_saveValidFile}"
+    echo "[+] Invalid lines saved to: ${path_saveInvalidFile}"
+    # Insert invalid lines into Vertica
+    echo "========================================================================================"
+    echo "Start Inserting To Vertica"
+    echo "========================================================================================"
+    if [[ -s "${path_saveInvalidFile}" ]]; then
+        echo "[+] Attempting to insert invalid lines into Vertica..."
+        ${GpVsql}vsql -h ${GsDWHbaseHostsql} -B ${backup} -U ${GsDWHbaseUser} -w ${GsDWHbasepswd}  -t -c "COPY ${GsDWHbaseSchema}.T_APP_REJ_ODS_GLOBAL(NB_ROWNUM, LB_CONTENU, LB_FILENAME, DT_DREJET, LB_NOMTABLE) FROM  '$path_saveInvalidFile' DELIMITER E'|' ENFORCELENGTH DIRECT;" >$path_saveLogFile 2>&1
+        QUERY_RESULT=$?
+        if [[ $QUERY_RESULT -ne 0 ]]; then
+            echo "[-] ERROR: Failed to update T_APP_REJ_ODS_GLOBAL with rejected lines. Check log $path_saveLogFile for details."
+        else
+            echo "[+] $(date +"%Y-%m-%d %H:%M:%S") - Rejected lines have been successfully updated in T_APP_REJ_ODS_GLOBAL."
+        fi
+        echo "[+] Vertica insertion completed."
+    fi
+
+    # Remove invalid file after processing
+    #rm -f "${path_saveInvalidFile}"
+
+
+}
+
+# Function to process files from the list, prepending path project and product to filenames
+function func_processFileList {
+    if [[ ! -f "$listFilesCourant" ]]; then
+        echo "[-] Error: List file $listFilesCourant does not exist."
+        return 1
+    fi
+
+    while IFS= read -r filename; do
+        if [[ -f "$listFilesCourant" ]]; then
+            echo "[+] Projet: $path_entryProject Produit: $nomProduit"
+            func_processSingleFile "$path_entryProject" "$nomProduit" "$filename"
+        else
+            echo "[-] File $path_entryFile not found."
+        fi
+    done <"$listFilesCourant"
+}
+
+# Call func_processFileList function with the file list
+func_processFileList 
+
