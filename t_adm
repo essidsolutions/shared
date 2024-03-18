@@ -1,0 +1,3 @@
+sd_basu31_0_controle_struct_fic_vide_refact.sh|$REP_ENTREE $NomFichierEntrant|MSGCTRL0002
+sd_basu31_0_controle_struct_fic_identique_refact.sh|$REP_ENTREE $NomFichierEntrant ${FILE_LISTECOURANTE}|MSGCTRL0005
+sd_basu31_0_purgedelim.sh|$REP_ENTREE $NomFichierEntrant ${FILE_LISTECOURANTE}|MSGCTRL0005
